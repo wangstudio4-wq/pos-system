@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS Kasir</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏪</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --primary-light: #dbeafe;
+            --success: #16a34a;
+            --success-light: #dcfce7;
+            --danger: #dc2626;
+            --danger-light: #fee2e2;
+            --warning: #f59e0b;
+            --warning-light: #fef3c7;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-500: #6b7280;
+            --gray-700: #374151;
+            --gray-900: #111827;
+            --sidebar-width: 240px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--gray-100);
+            color: var(--gray-900);
+            min-height: 100vh;
+        }
+
+        /* ============ LOGIN PAGE ============ */
+        .login-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #1e40af 100%);
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            width: 380px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+            text-align: center;
+        }
+
+        .login-card .logo { font-size: 48px; margin-bottom: 8px; }
+        .login-card h1 { font-size: 24px; color: var(--gray-900); margin-bottom: 4px; }
+        .login-card .subtitle { color: var(--gray-500); margin-bottom: 24px; font-size: 14px; }
+
+        .form-group { margin-bottom: 16px; text-align: left; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-700); margin-bottom: 6px; }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid var(--gray-200);
+            border-radius: 10px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        .form-input:focus { border-color: var(--primary); }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary { background: var(--primary); color: white; width: 100%; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { background: #15803d; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-outline { background: white; color: var(--gray-700); border: 2px solid var(--gray-200); }
+        .btn-outline:hover { background: var(--gray-50); border-color: var(--gray-300); }
+        .btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
+        .btn-warning { background: var(--warning); color: white; }
+
+        .alert {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .alert-error { background: var(--danger-light); color: var(--danger); display: block; }
+        .alert-success { background: var(--success-light); color: var(--success); display: block; }
+
+        /* ============ APP LAYOUT ============ */
+        .app-layout { display: none; min-height: 100vh; }
+
+        .sidebar {
+            position: fixed;
+            left: 0; top: 0; bottom: 0;
+            width: var(--sidebar-width);
+            background: var(--gray-900);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .sidebar-header .logo { font-size: 28px; }
+        .sidebar-header h2 { font-size: 18px; font-weight: 700; }
+        .sidebar-header .role-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+        .role-owner { background: #f59e0b; color: #000; }
+        .role-admin { background: #8b5cf6; color: #fff; }
+        .role-kasir { background: #06b6d4; color: #fff; }
+
+        .sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            border-left: 3px solid transparent;
+        }
+        .nav-item:hover { background: rgba(255,255,255,0.05); color: white; }
+        .nav-item.active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-left-color: var(--primary);
+        }
+        .nav-item .icon { font-size: 18px; width: 24px; text-align: center; }
+
+        .sidebar-footer {
+            padding: 16px 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .user-info { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .user-avatar {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: var(--primary);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 14px;
+        }
+        .user-name { font-size: 14px; font-weight: 600; }
+        .user-role { font-size: 12px; color: rgba(255,255,255,0.5); }
+
+        .btn-logout {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 8px;
+            color: rgba(255,255,255,0.7);
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .btn-logout:hover { background: rgba(220,38,38,0.3); color: #fca5a5; }
+
+        .main-content {
+            margin-left: var(--sidebar-width);
+            padding: 24px;
+            min-height: 100vh;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+        .page-header h1 { font-size: 24px; }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ============ CARDS ============ */
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            margin-bottom: 16px;
+        }
+
+        .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { display: flex; align-items: center; gap: 16px; }
+        .stat-icon { font-size: 32px; }
+        .stat-value { font-size: 24px; font-weight: 700; }
+        .stat-label { font-size: 13px; color: var(--gray-500); }
+
+        /* ============ TABLE ============ */
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; font-size: 13px; color: var(--gray-500); border-bottom: 2px solid var(--gray-200); font-weight: 600; }
+        td { padding: 12px; font-size: 14px; border-bottom: 1px solid var(--gray-100); }
+        tr:hover td { background: var(--gray-50); }
+
+        /* ============ POS CASHIER ============ */
+        .pos-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; }
+
+        .search-box {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 12px 14px 12px 42px;
+            border: 2px solid var(--gray-200);
+            border-radius: 10px;
+            font-size: 15px;
+            outline: none;
+        }
+        .search-box input:focus { border-color: var(--primary); }
+        .search-box .search-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 18px;
+        }
+
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            max-height: calc(100vh - 240px);
+            overflow-y: auto;
+        }
+
+        .product-card {
+            background: white;
+            border: 2px solid var(--gray-200);
+            border-radius: 12px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .product-card:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .product-card .product-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+        .product-card .product-price { color: var(--primary); font-weight: 700; font-size: 16px; }
+        .product-card .product-stock { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+        .product-card .product-stock.low { color: var(--danger); font-weight: 600; }
+
+        /* Cart */
+        .cart-panel { position: sticky; top: 24px; }
+        .cart-panel .card { max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+        .cart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .cart-header h3 { font-size: 18px; }
+        .cart-badge { background: var(--primary); color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+
+        .cart-items { flex: 1; overflow-y: auto; max-height: 300px; margin-bottom: 16px; }
+        .cart-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        .cart-item-info { flex: 1; }
+        .cart-item-name { font-size: 14px; font-weight: 600; }
+        .cart-item-price { font-size: 13px; color: var(--gray-500); }
+        .cart-item-subtotal { font-weight: 700; color: var(--primary); font-size: 14px; min-width: 80px; text-align: right; }
+
+        .qty-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 12px;
+        }
+        .qty-btn {
+            width: 28px; height: 28px;
+            border: 2px solid var(--gray-200);
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        .qty-btn:hover { background: var(--gray-100); }
+        .qty-btn.minus:hover { border-color: var(--danger); color: var(--danger); }
+        .qty-btn.plus:hover { border-color: var(--success); color: var(--success); }
+        .qty-value { font-weight: 700; font-size: 14px; min-width: 20px; text-align: center; }
+
+        .cart-totals { border-top: 2px solid var(--gray-200); padding-top: 12px; }
+        .cart-total-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+        .cart-total-row.grand { font-size: 20px; font-weight: 700; color: var(--primary); padding: 8px 0; }
+
+        .payment-section { margin-top: 12px; }
+        .payment-section .form-input { margin-bottom: 8px; font-size: 18px; font-weight: 700; text-align: right; }
+        .change-display { text-align: right; font-size: 14px; color: var(--success); font-weight: 600; margin-bottom: 12px; }
+
+        .btn-pay {
+            width: 100%;
+            padding: 14px;
+            font-size: 16px;
+            border-radius: 12px;
+        }
+
+        .empty-cart { text-align: center; padding: 40px 0; color: var(--gray-500); }
+        .empty-cart .icon { font-size: 48px; margin-bottom: 8px; }
+
+        /* ============ MODAL ============ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            width: 480px;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        }
+        .modal h2 { font-size: 20px; margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+
+        /* ============ RECEIPT ============ */
+        .receipt-modal .modal { width: 360px; font-family: 'Courier New', monospace; }
+        .receipt { text-align: center; font-size: 13px; }
+        .receipt hr { border: none; border-top: 1px dashed var(--gray-300); margin: 8px 0; }
+        .receipt .shop-name { font-size: 18px; font-weight: 700; }
+        .receipt table { font-size: 12px; }
+        .receipt table th, .receipt table td { padding: 4px 8px; }
+
+        /* ============ RESPONSIVE ============ */
+        @media (max-width: 768px) {
+            .sidebar { width: 0; overflow: hidden; transition: width 0.3s; }
+            .sidebar.open { width: var(--sidebar-width); }
+            .main-content { margin-left: 0; }
+            .pos-layout { grid-template-columns: 1fr; }
+            .product-grid { max-height: 40vh; }
+            .mobile-header { display: flex !important; }
+        }
+
+        .mobile-header {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--gray-900);
+            color: white;
+        }
+        .hamburger {
+            background: none; border: none; color: white; font-size: 24px; cursor: pointer;
+        }
+
+        /* Print receipt */
+        @media print {
+            body * { visibility: hidden; }
+            .receipt, .receipt * { visibility: visible; }
+            .receipt { position: absolute; left: 0; top: 0; width: 80mm; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ============ LOGIN PAGE ============ -->
+<div id="loginPage" class="login-page">
+    <div class="login-card">
+        <div class="logo">🏪</div>
+        <h1>POS Kasir</h1>
+        <p class="subtitle">Masuk untuk melanjutkan</p>
+        
+        <div id="loginAlert" class="alert"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="loginUsername" class="form-input" placeholder="Masukkan username" autocomplete="username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="form-input" placeholder="Masukkan password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Masuk →</button>
+        </form>
+    </div>
+</div>
+
+<!-- ============ APP LAYOUT ============ -->
+<div id="appLayout" class="app-layout">
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+        <button class="hamburger" onclick="toggleSidebar()">☰</button>
+        <span>🏪 POS Kasir</span>
+        <span id="mobileRole"></span>
+    </div>
+
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">🏪</div>
+            <h2>POS Kasir</h2>
+            <span id="roleBadge" class="role-badge"></span>
+        </div>
+
+        <div class="sidebar-nav" id="sidebarNav">
+            <!-- Generated by JS based on role -->
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div>
+                    <div class="user-name" id="userName"></div>
+                    <div class="user-role" id="userRole"></div>
+                </div>
+            </div>
+            <button class="btn-logout" onclick="logout()">🚪 Keluar</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        
+        <!-- ====== KASIR PAGE ====== -->
+        <div id="pagePOS" class="page">
+            <div class="page-header">
+                <h1>💰 Kasir</h1>
+                <span id="currentDate" style="color:var(--gray-500); font-size:14px;"></span>
+            </div>
+
+            <div class="pos-layout">
+                <div>
+                    <div class="search-box">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="searchProduct" placeholder="Cari produk atau scan barcode..." oninput="filterProducts()">
+                    </div>
+                    <div class="product-grid" id="productGrid">
+                        <!-- Generated by JS -->
+                    </div>
+                </div>
+
+                <div class="cart-panel">
+                    <div class="card">
+                        <div class="cart-header">
+                            <h3>🛒 Keranjang</h3>
+                            <span class="cart-badge" id="cartCount">0</span>
+                        </div>
+
+                        <div class="cart-items" id="cartItems">
+                            <div class="empty-cart">
+                                <div class="icon">🛒</div>
+                                <p>Keranjang kosong</p>
+                                <p style="font-size:12px">Klik produk untuk menambahkan</p>
+                            </div>
+                        </div>
+
+                        <div class="cart-totals" id="cartTotals" style="display:none;">
+                            <div class="cart-total-row grand">
+                                <span>Total</span>
+                                <span id="cartTotal">Rp 0</span>
+                            </div>
+                            <div class="payment-section">
+                                <input type="number" id="paymentInput" class="form-input" placeholder="Bayar..." oninput="calcChange()">
+                                <div class="change-display" id="changeDisplay"></div>
+                                <button class="btn btn-success btn-pay" id="btnPay" onclick="processPayment()" disabled>
+                                    💳 Bayar
+                                </button>
+                                <button class="btn btn-outline btn-pay" onclick="clearCart()" style="margin-top:8px;">
+                                    🗑️ Kosongkan
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== PRODUCTS PAGE ====== -->
+        <div id="pageProducts" class="page">
+            <div class="page-header">
+                <h1>📦 Kelola Produk</h1>
+                <button class="btn btn-primary" onclick="showProductModal()">+ Tambah Produk</button>
+            </div>
+            <div class="card">
+                <div class="search-box" style="margin-bottom:16px;">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="searchProductTable" placeholder="Cari produk..." oninput="filterProductTable()">
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Barcode</th>
+                                <th>Nama Produk</th>
+                                <th>Harga</th>
+                                <th>Stok</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== REPORTS PAGE ====== -->
+        <div id="pageReports" class="page">
+            <div class="page-header">
+                <h1>📊 Laporan Penjualan</h1>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-sm btn-outline" onclick="loadReport('today')">Hari Ini</button>
+                    <button class="btn btn-sm btn-outline" onclick="loadReport('week')">7 Hari</button>
+                    <button class="btn btn-sm btn-outline" onclick="loadReport('month')">30 Hari</button>
+                    <button class="btn btn-sm btn-primary" onclick="loadReport('all')">Semua</button>
+                </div>
+            </div>
+
+            <div class="stat-cards" id="reportStats"></div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                <div class="card">
+                    <h3 style="margin-bottom:12px;">👤 Omzet per Kasir</h3>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead><tr><th>Kasir</th><th>Transaksi</th><th>Omzet</th></tr></thead>
+                            <tbody id="cashierTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3 style="margin-bottom:12px;">🏆 Produk Terlaris</h3>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead><tr><th>Produk</th><th>Qty</th><th>Penjualan</th></tr></thead>
+                            <tbody id="topProductsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:16px;">
+                <h3 style="margin-bottom:12px;">📋 Riwayat Transaksi</h3>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#ID</th>
+                                <th>Tanggal</th>
+                                <th>Kasir</th>
+                                <th>Total</th>
+                                <th>Bayar</th>
+                                <th>Kembalian</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== USERS PAGE (Owner Only) ====== -->
+        <div id="pageUsers" class="page">
+            <div class="page-header">
+                <h1>👥 Kelola User</h1>
+                <button class="btn btn-primary" onclick="showUserModal()">+ Tambah User</button>
+            </div>
+            <div class="card">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Nama</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== CHANGE PASSWORD PAGE ====== -->
+        <div id="pagePassword" class="page">
+            <div class="page-header">
+                <h1>🔑 Ganti Password</h1>
+            </div>
+            <div class="card" style="max-width:400px;">
+                <div id="passwordAlert" class="alert"></div>
+                <div class="form-group">
+                    <label>Password Lama</label>
+                    <input type="password" id="oldPassword" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Password Baru</label>
+                    <input type="password" id="newPassword" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Konfirmasi Password Baru</label>
+                    <input type="password" id="confirmPassword" class="form-input">
+                </div>
+                <button class="btn btn-primary" onclick="changePassword()">💾 Simpan Password</button>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- ============ MODALS ============ -->
+
+<!-- Product Modal -->
+<div class="modal-overlay" id="productModal">
+    <div class="modal">
+        <h2 id="productModalTitle">Tambah Produk</h2>
+        <input type="hidden" id="editProductId">
+        <div class="form-group">
+            <label>Barcode (opsional)</label>
+            <input type="text" id="prodBarcode" class="form-input" placeholder="Scan atau ketik barcode">
+        </div>
+        <div class="form-group">
+            <label>Nama Produk *</label>
+            <input type="text" id="prodName" class="form-input" placeholder="Nama produk" required>
+        </div>
+        <div class="form-group">
+            <label>Harga *</label>
+            <input type="number" id="prodPrice" class="form-input" placeholder="0" required>
+        </div>
+        <div class="form-group">
+            <label>Stok</label>
+            <input type="number" id="prodStock" class="form-input" placeholder="0" value="0">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('productModal')">Batal</button>
+            <button class="btn btn-primary" onclick="saveProduct()">💾 Simpan</button>
+        </div>
+    </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal-overlay" id="userModal">
+    <div class="modal">
+        <h2 id="userModalTitle">Tambah User</h2>
+        <input type="hidden" id="editUserId">
+        <div class="form-group">
+            <label>Username *</label>
+            <input type="text" id="userUsername" class="form-input" placeholder="Username" required>
+        </div>
+        <div class="form-group">
+            <label>Nama Lengkap *</label>
+            <input type="text" id="userFullname" class="form-input" placeholder="Nama lengkap" required>
+        </div>
+        <div class="form-group" id="userPasswordGroup">
+            <label>Password *</label>
+            <input type="password" id="userPassword" class="form-input" placeholder="Password">
+        </div>
+        <div class="form-group">
+            <label>Role *</label>
+            <select id="userRoleSelect" class="form-input">
+                <option value="kasir">Kasir</option>
+                <option value="admin">Admin</option>
+                <option value="owner">Owner</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('userModal')">Batal</button>
+            <button class="btn btn-primary" onclick="saveUser()">💾 Simpan</button>
+        </div>
+    </div>
+</div>
+
+<!-- Receipt Modal -->
+<div class="modal-overlay receipt-modal" id="receiptModal">
+    <div class="modal">
+        <div class="receipt" id="receiptContent"></div>
+        <div class="modal-actions" style="justify-content:center;">
+            <button class="btn btn-outline" onclick="closeModal('receiptModal')">Tutup</button>
+            <button class="btn btn-primary" onclick="printReceipt()">🖨️ Cetak Struk</button>
+        </div>
+    </div>
+</div>
+
+
+<script>
+// ============ STATE ============
+const API = '';
+let token = localStorage.getItem('pos_token');
+let currentUser = null;
+let products = [];
+let cart = [];
+
+// ============ API HELPER ============
+async function api(endpoint, options = {}) {
+    const config = {
+        headers: { 'Content-Type': 'application/json' },
+        ...options
+    };
+    if (token) config.headers['Authorization'] = `Bearer ${token}`;
+    
+    const res = await fetch(API + endpoint, config);
+    const data = await res.json();
+    
+    if (res.status === 401 || res.status === 403) {
+        if (endpoint !== '/api/auth/login') {
+            logout();
+            return null;
+        }
+    }
+    
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+}
+
+// ============ AUTH ============
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertEl = document.getElementById('loginAlert');
+    alertEl.className = 'alert';
+    alertEl.style.display = 'none';
+
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+
+    try {
+        const data = await api('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+        
+        token = data.token;
+        localStorage.setItem('pos_token', token);
+        currentUser = data.user;
+        showApp();
+    } catch (err) {
+        alertEl.textContent = '❌ ' + err.message;
+        alertEl.className = 'alert alert-error';
+        alertEl.style.display = 'block';
+    }
+});
+
+async function loadCurrentUser() {
+    try {
+        currentUser = await api('/api/auth/me');
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function logout() {
+    try { api('/api/auth/logout', { method: 'POST' }); } catch {}
+    token = null;
+    currentUser = null;
+    localStorage.removeItem('pos_token');
+    document.getElementById('loginPage').style.display = 'flex';
+    document.getElementById('appLayout').style.display = 'none';
+}
+
+async function changePassword() {
+    const alertEl = document.getElementById('passwordAlert');
+    const oldPwd = document.getElementById('oldPassword').value;
+    const newPwd = document.getElementById('newPassword').value;
+    const confirmPwd = document.getElementById('confirmPassword').value;
+
+    if (newPwd !== confirmPwd) {
+        alertEl.textContent = '❌ Password baru tidak cocok!';
+        alertEl.className = 'alert alert-error';
+        return;
+    }
+
+    try {
+        await api('/api/auth/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+        });
+        alertEl.textContent = '✅ Password berhasil diganti!';
+        alertEl.className = 'alert alert-success';
+        document.getElementById('oldPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmPassword').value = '';
+    } catch (err) {
+        alertEl.textContent = '❌ ' + err.message;
+        alertEl.className = 'alert alert-error';
+    }
+}
+
+// ============ APP INIT ============
+async function showApp() {
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('appLayout').style.display = 'block';
+
+    // Set user info
+    const name = currentUser.name || currentUser.username;
+    document.getElementById('userName').textContent = name;
+    document.getElementById('userRole').textContent = currentUser.role.toUpperCase();
+    document.getElementById('userAvatar').textContent = name.charAt(0).toUpperCase();
+    
+    const badge = document.getElementById('roleBadge');
+    badge.textContent = currentUser.role.toUpperCase();
+    badge.className = 'role-badge role-' + currentUser.role;
+    
+    document.getElementById('mobileRole').textContent = currentUser.role.toUpperCase();
+
+    // Build navigation based on role
+    buildNav();
+    
+    // Set current date
+    const now = new Date();
+    document.getElementById('currentDate').textContent = now.toLocaleDateString('id-ID', { 
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    });
+
+    // Load products
+    await loadProducts();
+
+    // Navigate to default page
+    navigateTo('POS');
+}
+
+function buildNav() {
+    const nav = document.getElementById('sidebarNav');
+    const role = currentUser.role;
+    
+    let items = [
+        { id: 'POS', icon: '💰', label: 'Kasir', roles: ['kasir', 'admin', 'owner'] },
+        { id: 'Products', icon: '📦', label: 'Kelola Produk', roles: ['admin', 'owner'] },
+        { id: 'Reports', icon: '📊', label: 'Laporan', roles: ['admin', 'owner'] },
+        { id: 'Users', icon: '👥', label: 'Kelola User', roles: ['owner'] },
+        { id: 'Password', icon: '🔑', label: 'Ganti Password', roles: ['kasir', 'admin', 'owner'] },
+    ];
+
+    nav.innerHTML = items
+        .filter(item => item.roles.includes(role))
+        .map(item => `
+            <div class="nav-item" data-page="${item.id}" onclick="navigateTo('${item.id}')">
+                <span class="icon">${item.icon}</span>
+                ${item.label}
+            </div>
+        `).join('');
+}
+
+function navigateTo(pageId) {
+    // Hide all pages
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    // Show target page
+    const page = document.getElementById('page' + pageId);
+    if (page) page.classList.add('active');
+
+    const navItem = document.querySelector(`.nav-item[data-page="${pageId}"]`);
+    if (navItem) navItem.classList.add('active');
+
+    // Load data for page
+    if (pageId === 'Products') loadProductTable();
+    if (pageId === 'Reports') loadReport('today');
+    if (pageId === 'Users') loadUsers();
+
+    // Close sidebar on mobile
+    document.getElementById('sidebar').classList.remove('open');
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ============ PRODUCTS ============
+async function loadProducts() {
+    try {
+        products = await api('/api/products');
+    } catch (err) {
+        console.error('Load products error:', err);
+        products = [];
+    }
+    renderProductGrid();
+}
+
+function renderProductGrid() {
+    const grid = document.getElementById('productGrid');
+    const search = document.getElementById('searchProduct').value.toLowerCase();
+    
+    const filtered = products.filter(p => 
+        p.name.toLowerCase().includes(search) || 
+        (p.barcode && p.barcode.includes(search))
+    );
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--gray-500);">Tidak ada produk ditemukan</div>';
+        return;
+    }
+
+    grid.innerHTML = filtered.map(p => `
+        <div class="product-card" onclick="addToCart(${p.id})">
+            <div class="product-name">${escHtml(p.name)}</div>
+            <div class="product-price">${formatRp(p.price)}</div>
+            <div class="product-stock ${p.stock <= 5 ? 'low' : ''}">Stok: ${p.stock}</div>
+        </div>
+    `).join('');
+}
+
+function filterProducts() { renderProductGrid(); }
+
+// Product Table (Admin/Owner)
+async function loadProductTable() {
+    await loadProducts();
+    renderProductTable();
+}
+
+function renderProductTable() {
+    const body = document.getElementById('productTableBody');
+    const search = document.getElementById('searchProductTable')?.value?.toLowerCase() || '';
+    const role = currentUser.role;
+
+    const filtered = products.filter(p =>
+        p.name.toLowerCase().includes(search) ||
+        (p.barcode && p.barcode.includes(search))
+    );
+
+    body.innerHTML = filtered.map(p => `
+        <tr>
+            <td>${p.barcode || '-'}</td>
+            <td>${escHtml(p.name)}</td>
+            <td>${formatRp(p.price)}</td>
+            <td><span style="color:${p.stock <= 5 ? 'var(--danger)' : 'inherit'}; font-weight:${p.stock <= 5 ? '700' : '400'}">${p.stock}</span></td>
+            <td>
+                <button class="btn btn-sm btn-outline" onclick='editProduct(${JSON.stringify(p)})'>✏️</button>
+                ${role === 'owner' ? `<button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">🗑️</button>` : ''}
+            </td>
+        </tr>
+    `).join('');
+}
+
+function filterProductTable() { renderProductTable(); }
+
+function showProductModal(product = null) {
+    document.getElementById('productModalTitle').textContent = product ? 'Edit Produk' : 'Tambah Produk';
+    document.getElementById('editProductId').value = product ? product.id : '';
+    document.getElementById('prodBarcode').value = product ? (product.barcode || '') : '';
+    document.getElementById('prodName').value = product ? product.name : '';
+    document.getElementById('prodPrice').value = product ? product.price : '';
+    document.getElementById('prodStock').value = product ? product.stock : 0;
+    document.getElementById('productModal').classList.add('show');
+}
+
+function editProduct(product) { showProductModal(product); }
+
+async function saveProduct() {
+    const id = document.getElementById('editProductId').value;
+    const data = {
+        barcode: document.getElementById('prodBarcode').value || null,
+        name: document.getElementById('prodName').value,
+        price: Number(document.getElementById('prodPrice').value),
+        stock: Number(document.getElementById('prodStock').value) || 0
+    };
+
+    if (!data.name || !data.price) return alert('Nama dan harga wajib diisi!');
+
+    try {
+        if (id) {
+            await api(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+        } else {
+            await api('/api/products', { method: 'POST', body: JSON.stringify(data) });
+        }
+        closeModal('productModal');
+        await loadProducts();
+        renderProductTable();
+    } catch (err) {
+        alert('❌ ' + err.message);
+    }
+}
+
+async function deleteProduct(id) {
+    if (!confirm('Yakin hapus produk ini?')) return;
+    try {
+        await api(`/api/products/${id}`, { method: 'DELETE' });
+        await loadProducts();
+        renderProductTable();
+    } catch (err) {
+        alert('❌ ' + err.message);
+    }
+}
+
+// ============ CART ============
+function addToCart(productId) {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    if (product.stock <= 0) return alert('Stok habis!');
+
+    const existing = cart.find(c => c.id === productId);
+    if (existing) {
+        if (existing.qty >= product.stock) return alert('Stok tidak cukup!');
+        existing.qty++;
+    } else {
+        cart.push({ ...product, qty: 1 });
+    }
+    renderCart();
+}
+
+function updateQty(productId, delta) {
+    const item = cart.find(c => c.id === productId);
+    if (!item) return;
+
+    item.qty += delta;
+    if (item.qty <= 0) {
+        cart = cart.filter(c => c.id !== productId);
+    } else {
+        const product = products.find(p => p.id === productId);
+        if (product && item.qty > product.stock) {
+            item.qty = product.stock;
+            alert('Stok tidak cukup!');
+        }
+    }
+    renderCart();
+}
+
+function clearCart() {
+    cart = [];
+    renderCart();
+}
+
+function renderCart() {
+    const container = document.getElementById('cartItems');
+    const totalsEl = document.getElementById('cartTotals');
+    const countEl = document.getElementById('cartCount');
+
+    countEl.textContent = cart.reduce((sum, item) => sum + item.qty, 0);
+
+    if (cart.length === 0) {
+        container.innerHTML = `
+            <div class="empty-cart">
+                <div class="icon">🛒</div>
+                <p>Keranjang kosong</p>
+                <p style="font-size:12px">Klik produk untuk menambahkan</p>
+            </div>`;
+        totalsEl.style.display = 'none';
+        document.getElementById('paymentInput').value = '';
+        document.getElementById('changeDisplay').textContent = '';
+        return;
+    }
+
+    container.innerHTML = cart.map(item => `
+        <div class="cart-item">
+            <div class="cart-item-info">
+                <div class="cart-item-name">${escHtml(item.name)}</div>
+                <div class="cart-item-price">${formatRp(item.price)}</div>
+            </div>
+            <div class="qty-controls">
+                <button class="qty-btn minus" onclick="updateQty(${item.id}, -1)">−</button>
+                <span class="qty-value">${item.qty}</span>
+                <button class="qty-btn plus" onclick="updateQty(${item.id}, 1)">+</button>
+            </div>
+            <div class="cart-item-subtotal">${formatRp(item.price * item.qty)}</div>
+        </div>
+    `).join('');
+
+    const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    document.getElementById('cartTotal').textContent = formatRp(total);
+    totalsEl.style.display = 'block';
+    calcChange();
+}
+
+function calcChange() {
+    const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    const payment = Number(document.getElementById('paymentInput').value) || 0;
+    const change = payment - total;
+    const btn = document.getElementById('btnPay');
+    const display = document.getElementById('changeDisplay');
+
+    if (payment >= total && total > 0) {
+        display.textContent = `Kembalian: ${formatRp(change)}`;
+        display.style.color = 'var(--success)';
+        btn.disabled = false;
+    } else if (payment > 0) {
+        display.textContent = `Kurang: ${formatRp(Math.abs(change))}`;
+        display.style.color = 'var(--danger)';
+        btn.disabled = true;
+    } else {
+        display.textContent = '';
+        btn.disabled = true;
+    }
+}
+
+async function processPayment() {
+    const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    const payment = Number(document.getElementById('paymentInput').value);
+    const change = payment - total;
+
+    try {
+        const result = await api('/api/transactions', {
+            method: 'POST',
+            body: JSON.stringify({
+                items: cart.map(item => ({ id: item.id, name: item.name, price: item.price, qty: item.qty })),
+                total, payment, change
+            })
+        });
+
+        showReceipt(result.transaction, cart, payment, change);
+        cart = [];
+        renderCart();
+        await loadProducts();
+    } catch (err) {
+        alert('❌ ' + err.message);
+    }
+}
+
+function showReceipt(tx, items, payment, change) {
+    const now = new Date();
+    const content = document.getElementById('receiptContent');
+    content.innerHTML = `
+        <div class="shop-name">🏪 TOKO SAYA</div>
+        <p>Jl. Contoh No. 123</p>
+        <p>${now.toLocaleDateString('id-ID')} ${now.toLocaleTimeString('id-ID')}</p>
+        <p>Kasir: ${currentUser.name || currentUser.username}</p>
+        <p>No: #${String(tx.id).padStart(6, '0')}</p>
+        <hr>
+        <table style="width:100%">
+            <tbody>
+                ${items.map(item => `
+                    <tr>
+                        <td style="text-align:left">${escHtml(item.name)}</td>
+                        <td style="text-align:center">${item.qty}x</td>
+                        <td style="text-align:right">${formatRp(item.price * item.qty)}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        <hr>
+        <table style="width:100%">
+            <tr><td style="text-align:left"><strong>TOTAL</strong></td><td style="text-align:right"><strong>${formatRp(tx.total)}</strong></td></tr>
+            <tr><td style="text-align:left">Bayar</td><td style="text-align:right">${formatRp(payment)}</td></tr>
+            <tr><td style="text-align:left">Kembali</td><td style="text-align:right">${formatRp(change)}</td></tr>
+        </table>
+        <hr>
+        <p>Terima kasih!</p>
+        <p style="font-size:11px;">Barang yang sudah dibeli<br>tidak dapat dikembalikan</p>
+    `;
+    document.getElementById('receiptModal').classList.add('show');
+}
+
+function printReceipt() {
+    window.print();
+}
+
+// ============ REPORTS ============
+async function loadReport(period = 'today') {
+    try {
+        const [report, transactions] = await Promise.all([
+            api(`/api/reports/sales?period=${period}`),
+            api(`/api/transactions${period !== 'all' ? '?date=' + (period === 'today' ? new Date().toISOString().split('T')[0] : '') : ''}`)
+                .catch(() => [])
+        ]);
+
+        // Stats
+        document.getElementById('reportStats').innerHTML = `
+            <div class="card stat-card">
+                <div class="stat-icon">📊</div>
+                <div>
+                    <div class="stat-value">${report.summary.total_transactions}</div>
+                    <div class="stat-label">Total Transaksi</div>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon">💰</div>
+                <div>
+                    <div class="stat-value">${formatRp(report.summary.total_revenue)}</div>
+                    <div class="stat-label">Total Omzet</div>
+                </div>
+            </div>
+        `;
+
+        // Per cashier
+        document.getElementById('cashierTable').innerHTML = report.per_cashier.map(c => `
+            <tr>
+                <td>${escHtml(c.cashier_name)}</td>
+                <td>${c.transactions}</td>
+                <td>${formatRp(c.revenue)}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--gray-500);">Belum ada data</td></tr>';
+
+        // Top products
+        document.getElementById('topProductsTable').innerHTML = report.top_products.map(p => `
+            <tr>
+                <td>${escHtml(p.product_name)}</td>
+                <td>${p.total_qty}</td>
+                <td>${formatRp(p.total_sales)}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--gray-500);">Belum ada data</td></tr>';
+
+        // Transactions list
+        const txList = Array.isArray(transactions) ? transactions : [];
+        document.getElementById('transactionTable').innerHTML = txList.map(t => `
+            <tr>
+                <td>#${String(t.id).padStart(6, '0')}</td>
+                <td>${new Date(t.created_at).toLocaleString('id-ID')}</td>
+                <td>${escHtml(t.cashier_name || '-')}</td>
+                <td>${formatRp(t.total)}</td>
+                <td>${formatRp(t.payment)}</td>
+                <td>${formatRp(t.change)}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray-500);">Belum ada transaksi</td></tr>';
+
+        // Highlight active button
+        document.querySelectorAll('#pageReports .page-header .btn').forEach(btn => {
+            btn.className = 'btn btn-sm ' + (btn.textContent.toLowerCase().includes(
+                period === 'today' ? 'hari' : period === 'week' ? '7' : period === 'month' ? '30' : 'semua'
+            ) ? 'btn-primary' : 'btn-outline');
+        });
+
+    } catch (err) {
+        console.error('Report error:', err);
+    }
+}
+
+// ============ USERS (Owner) ============
+async function loadUsers() {
+    try {
+        const users = await api('/api/users');
+        const body = document.getElementById('userTableBody');
+        body.innerHTML = users.map(u => `
+            <tr>
+                <td>${escHtml(u.username)}</td>
+                <td>${escHtml(u.name)}</td>
+                <td><span class="role-badge role-${u.role}" style="font-size:11px;">${u.role.toUpperCase()}</span></td>
+                <td>${u.is_active ? '✅ Aktif' : '❌ Nonaktif'}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline" onclick='editUser(${JSON.stringify(u)})'>✏️</button>
+                    <button class="btn btn-sm ${u.is_active ? 'btn-warning' : 'btn-success'}" 
+                        onclick="toggleUserActive(${u.id}, ${u.is_active ? 0 : 1})">
+                        ${u.is_active ? '🚫' : '✅'}
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Load users error:', err);
+    }
+}
+
+function showUserModal(user = null) {
+    document.getElementById('userModalTitle').textContent = user ? 'Edit User' : 'Tambah User';
+    document.getElementById('editUserId').value = user ? user.id : '';
+    document.getElementById('userUsername').value = user ? user.username : '';
+    document.getElementById('userFullname').value = user ? user.name : '';
+    document.getElementById('userPassword').value = '';
+    document.getElementById('userRoleSelect').value = user ? user.role : 'kasir';
+    
+    // Password not required when editing
+    document.getElementById('userPasswordGroup').querySelector('label').textContent = 
+        user ? 'Password (kosongkan jika tidak diganti)' : 'Password *';
+    
+    document.getElementById('userModal').classList.add('show');
+}
+
+function editUser(user) { showUserModal(user); }
+
+async function saveUser() {
+    const id = document.getElementById('editUserId').value;
+    const data = {
+        username: document.getElementById('userUsername').value,
+        name: document.getElementById('userFullname').value,
+        role: document.getElementById('userRoleSelect').value
+    };
+    
+    const password = document.getElementById('userPassword').value;
+    if (password) data.password = password;
+
+    if (!data.username || !data.name) return alert('Username dan nama wajib diisi!');
+    if (!id && !password) return alert('Password wajib diisi untuk user baru!');
+
+    try {
+        if (id) {
+            await api(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+        } else {
+            await api('/api/users', { method: 'POST', body: JSON.stringify(data) });
+        }
+        closeModal('userModal');
+        loadUsers();
+    } catch (err) {
+        alert('❌ ' + err.message);
+    }
+}
+
+async function toggleUserActive(userId, isActive) {
+    try {
+        await api(`/api/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ is_active: isActive })
+        });
+        loadUsers();
+    } catch (err) {
+        alert('❌ ' + err.message);
+    }
+}
+
+// ============ HELPERS ============
+function formatRp(n) {
+    return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+}
+
+function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+
+// Close modal on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('show');
+    });
+});
+
+// ============ BARCODE SCANNER ============
+let barcodeBuffer = '';
+let barcodeTimeout = null;
+
+document.addEventListener('keydown', (e) => {
+    // Only scan when on POS page and not in input
+    const activePage = document.querySelector('.page.active');
+    if (!activePage || activePage.id !== 'pagePOS') return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        // Allow barcode in search field
+        if (e.target.id !== 'searchProduct') return;
+    }
+
+    if (e.key === 'Enter' && barcodeBuffer.length > 3) {
+        e.preventDefault();
+        scanBarcode(barcodeBuffer);
+        barcodeBuffer = '';
+        return;
+    }
+
+    if (e.key.length === 1) {
+        barcodeBuffer += e.key;
+        clearTimeout(barcodeTimeout);
+        barcodeTimeout = setTimeout(() => { barcodeBuffer = ''; }, 100);
+    }
+});
+
+async function scanBarcode(barcode) {
+    try {
+        const product = await api(`/api/products/barcode/${barcode}`);
+        addToCart(product.id);
+        document.getElementById('searchProduct').value = '';
+    } catch {
+        alert('Produk dengan barcode "' + barcode + '" tidak ditemukan!');
+    }
+}
+
+// ============ AUTO-LOGIN CHECK ============
+(async function init() {
+    if (token) {
+        const ok = await loadCurrentUser();
+        if (ok && currentUser) {
+            showApp();
+            return;
+        }
+    }
+    document.getElementById('loginPage').style.display = 'flex';
+})();
+</script>
+
+</body>
+</html>
