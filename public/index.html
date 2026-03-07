@@ -1937,22 +1937,22 @@ async function renderExpenses() {
   const main = document.getElementById('mainContent');
   try {
     const today = new Date().toISOString().split('T')[0];
-    const [expData, summaryData] = await Promise.all([
-      apiFetch('/api/expenses?month=' + today.substring(0,7)),
-      apiFetch('/api/expenses/summary?period=month').catch(() => ({ total: 0 }))
+    const getSummaryTotal = (d) => d?.summary?.total_expenses || d?.summary?.total || d?.total_expenses || d?.total || 0;
+    const [expData, monthSum, todaySum, weekSum] = await Promise.all([
+      apiFetch('/api/expenses?month=' + today.substring(0,7)).catch(() => []),
+      apiFetch('/api/expenses/summary?period=month').catch(() => ({ total: 0 })),
+      apiFetch('/api/expenses/summary?period=today').catch(() => ({ total: 0 })),
+      apiFetch('/api/expenses/summary?period=week').catch(() => ({ total: 0 }))
     ]);
-    const expenses = expData.expenses || expData || [];
-    const summary = summaryData;
+    const expenses = Array.isArray(expData) ? expData : (expData.expenses || []);
 
-    let html = '<div class="page-header"><h1>💸 Pengeluaran</h1><p>Catat dan kelola pengeluaran</p></div>';
+    let html = '<div class="page-header"><h1>💸 Pengeluaran</h1><p>Catat dan kelola pengeluaran toko</p></div>';
 
     // Summary cards
-    const todaySum = await apiFetch('/api/expenses/summary?period=today').catch(() => ({ total: 0 }));
-    const weekSum = await apiFetch('/api/expenses/summary?period=week').catch(() => ({ total: 0 }));
     html += '<div class="stat-grid">';
-    html += '<div class="stat-card stat-red"><div class="stat-icon">📅</div><div class="stat-value">' + formatRp(todaySum.total || todaySum.summary?.total) + '</div><div class="stat-label">Hari Ini</div></div>';
-    html += '<div class="stat-card stat-blue"><div class="stat-icon">📆</div><div class="stat-value">' + formatRp(weekSum.total || weekSum.summary?.total) + '</div><div class="stat-label">Minggu Ini</div></div>';
-    html += '<div class="stat-card stat-purple"><div class="stat-icon">🗓️</div><div class="stat-value">' + formatRp(summary.total || summary.summary?.total) + '</div><div class="stat-label">Bulan Ini</div></div>';
+    html += '<div class="stat-card stat-red"><div class="stat-icon">📅</div><div class="stat-value">' + formatRp(getSummaryTotal(todaySum)) + '</div><div class="stat-label">Hari Ini</div></div>';
+    html += '<div class="stat-card stat-blue"><div class="stat-icon">📆</div><div class="stat-value">' + formatRp(getSummaryTotal(weekSum)) + '</div><div class="stat-label">Minggu Ini</div></div>';
+    html += '<div class="stat-card stat-purple"><div class="stat-icon">🗓️</div><div class="stat-value">' + formatRp(getSummaryTotal(monthSum)) + '</div><div class="stat-label">Bulan Ini</div></div>';
     html += '</div>';
 
     // Toolbar
