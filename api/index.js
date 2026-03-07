@@ -430,6 +430,11 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
       'SELECT * FROM shifts WHERE user_id = ? AND status = "open" LIMIT 1', [req.user.id]
     );
 
+    // Low stock products list
+    let lowStockProducts = await safeQuery(
+      'SELECT id, name, stock, min_stock FROM products WHERE stock <= min_stock ORDER BY stock ASC LIMIT 20'
+    ) || [];
+
     res.json({
       today: {
         transactions: todaySales ? todaySales[0].transactions : 0,
@@ -446,7 +451,8 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
       sales_chart: salesChart,
       recent_transactions: recentTx,
       top_products_today: topToday,
-      current_shift: currentShift && currentShift.length > 0 ? currentShift[0] : null
+      current_shift: currentShift && currentShift.length > 0 ? currentShift[0] : null,
+      low_stock_products: lowStockProducts
     });
   } catch (err) {
     console.error('Dashboard error:', err);
@@ -455,6 +461,18 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 });
 
 // ============ PRODUCT ROUTES ============
+
+// GET low stock products
+app.get('/api/products/low-stock', authenticateToken, async (req, res) => {
+  try {
+    const products = await pool.query(
+      'SELECT id, name, stock, min_stock, price, cost_price FROM products WHERE stock <= min_stock ORDER BY stock ASC'
+    );
+    res.json(products[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET all products (with category)
 app.get('/api/products', authenticateToken, async (req, res) => {

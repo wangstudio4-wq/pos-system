@@ -596,6 +596,28 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
   @page { size: 80mm auto; margin: 0; }
 }
 
+
+/* Notification Bell */
+.notif-wrapper { position: relative; }
+.notif-bell { cursor: pointer; font-size: 22px; position: relative; padding: 6px; border-radius: 10px; transition: all .2s; }
+.notif-bell:hover { background: rgba(161,204,165,0.15); }
+.notif-badge { position: absolute; top: 2px; right: 0; background: #dc2626; color: #fff; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; border: 2px solid var(--sidebar-bg); animation: pulse-badge 2s infinite; }
+@keyframes pulse-badge { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+.notif-panel { display: none; position: absolute; top: 100%; left: 0; width: 320px; max-height: 400px; background: var(--card-bg); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.25); border: 1px solid var(--border); z-index: 1000; overflow: hidden; }
+.notif-panel.show { display: block; animation: slideDown .2s ease; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.notif-panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; background: linear-gradient(135deg, rgba(65,93,67,.08), rgba(113,151,117,.08)); }
+.notif-panel-body { max-height: 320px; overflow-y: auto; padding: 8px; }
+.notif-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; transition: background .15s; cursor: default; }
+.notif-item:hover { background: rgba(65,93,67,.06); }
+.notif-item-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.notif-item-icon.danger { background: rgba(220,38,38,.1); }
+.notif-item-icon.warning { background: rgba(234,179,8,.1); }
+.notif-item-info { flex: 1; min-width: 0; }
+.notif-item-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notif-item-detail { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.notif-empty { padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.stock-warning-badge { position: absolute; top: 4px; right: 4px; font-size: 14px; animation: pulse-badge 2s infinite; }
 </style>
 </head>
 <body>
@@ -694,6 +716,13 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
         <div style="display:flex;align-items:center;gap:12px">
           <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#415D43,#709775);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 12px rgba(65,93,67,.4)">🏪</div>
           <div><h2>KasirPro</h2><small>Point of Sale</small></div>
+        </div>
+        <div class="notif-wrapper" id="notifWrapper">
+          <div class="notif-bell" onclick="toggleNotifPanel()" title="Peringatan Stok">🔔<span class="notif-badge" id="notifBadge" style="display:none">0</span></div>
+          <div class="notif-panel" id="notifPanel">
+            <div class="notif-panel-header">⚠️ Peringatan Stok</div>
+            <div class="notif-panel-body" id="notifBody"><div class="notif-empty">Semua stok aman ✅</div></div>
+          </div>
         </div>
       </div>
       <nav class="sidebar-nav" id="sidebarNav"></nav>
@@ -880,6 +909,65 @@ function showApp() {
   document.getElementById('appContainer').style.display = 'block';
   renderSidebar();
   navigateTo(currentUser.role === 'kasir' ? 'pos' : 'dashboard');
+}
+
+// ============ LOW STOCK NOTIFICATIONS ============
+let lowStockData = [];
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  panel.classList.toggle('show');
+}
+
+// Close panel when clicking outside
+document.addEventListener('click', function(e) {
+  const wrapper = document.getElementById('notifWrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    document.getElementById('notifPanel')?.classList.remove('show');
+  }
+});
+
+async function loadLowStockNotifications() {
+  try {
+    const res = await fetch(API + '/api/products/low-stock', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) return;
+    lowStockData = await res.json();
+    updateNotifBadge();
+  } catch (e) { console.log('Low stock check failed:', e); }
+}
+
+function updateNotifBadge() {
+  const badge = document.getElementById('notifBadge');
+  const body = document.getElementById('notifBody');
+  if (!badge || !body) return;
+
+  const count = lowStockData.length;
+  if (count === 0) {
+    badge.style.display = 'none';
+    body.innerHTML = '<div class="notif-empty">Semua stok aman ✅</div>';
+    return;
+  }
+
+  badge.style.display = 'flex';
+  badge.textContent = count > 99 ? '99+' : count;
+
+  let html = '';
+  lowStockData.forEach(p => {
+    const isOut = p.stock === 0;
+    const iconClass = isOut ? 'danger' : 'warning';
+    const icon = isOut ? '🚫' : '⚠️';
+    const status = isOut ? 'HABIS' : 'Sisa ' + p.stock;
+    html += '<div class="notif-item">' +
+      '<div class="notif-item-icon ' + iconClass + '">' + icon + '</div>' +
+      '<div class="notif-item-info">' +
+        '<div class="notif-item-name">' + escHtml(p.name) + '</div>' +
+        '<div class="notif-item-detail">' + status + ' — min: ' + (p.min_stock || 0) + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  body.innerHTML = html;
 }
 
 function logout() {
@@ -1221,11 +1309,13 @@ function renderProductGrid() {
   return filtered.map(p => {
     const oos = (p.stock !== undefined && p.stock !== null && p.stock <= 0);
     const catColor = p.category_color || '#6b7280';
-    return '<div class="product-card' + (oos ? ' out-of-stock' : '') + '" onclick="addToCart(' + p.id + ')">' +
+    const lowStk = (!oos && p.min_stock && p.stock <= p.min_stock);
+    return '<div class="product-card' + (oos ? ' out-of-stock' : '') + '" style="' + (lowStk ? 'border: 2px solid #f59e0b;' : '') + 'position:relative" onclick="addToCart(' + p.id + ')">' +
+      (lowStk ? '<span class="stock-warning-badge" title="Stok menipis!">⚠️</span>' : '') +
       '<div class="p-name">' + escHtml(p.name) + '</div>' +
       '<div class="p-price">' + formatRp(p.price) + '</div>' +
       '<div class="p-meta">' +
-        '<span class="p-stock">' + (oos ? '❌ Habis' : '📦 ' + p.stock) + '</span>' +
+        '<span class="p-stock"' + (lowStk ? ' style="color:#f59e0b;font-weight:700"' : '') + '>' + (oos ? '❌ Habis' : (lowStk ? '⚠️ ' + p.stock : '📦 ' + p.stock)) + '</span>' +
         (p.category_name ? '<span class="category-badge" style="background:' + escHtml(catColor) + '">' + escHtml(p.category_name) + '</span>' : '') +
       '</div></div>';
   }).join('');
