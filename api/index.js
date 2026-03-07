@@ -146,6 +146,21 @@ app.post('/api/setup/init', async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )`);
 
+      await conn.query(`CREATE TABLE IF NOT EXISTS settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        store_name VARCHAR(100) DEFAULT 'KasirPro',
+        store_address TEXT DEFAULT NULL,
+        store_phone VARCHAR(20) DEFAULT NULL,
+        tax_enabled TINYINT(1) DEFAULT 0,
+        tax_name VARCHAR(50) DEFAULT 'PB1',
+        tax_rate DECIMAL(5,2) DEFAULT 10.00,
+        service_charge_enabled TINYINT(1) DEFAULT 0,
+        service_charge_rate DECIMAL(5,2) DEFAULT 5.00,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CHECK (id = 1)
+      )`);
+      await conn.query(`INSERT IGNORE INTO settings (id) VALUES (1)`);
+
       // Default categories
       await conn.query(`INSERT IGNORE INTO categories (id, name, color) VALUES
         (1, 'Makanan', '#ef4444'),
@@ -273,6 +288,19 @@ async function runAutoMigrate() {
   await safeExec('transactions.void_reason', `ALTER TABLE transactions ADD COLUMN void_reason TEXT DEFAULT NULL`);
   await safeExec('transactions.voided_by', `ALTER TABLE transactions ADD COLUMN voided_by VARCHAR(100) DEFAULT NULL`);
   await safeExec('transactions.voided_at', `ALTER TABLE transactions ADD COLUMN voided_at TIMESTAMP NULL DEFAULT NULL`);
+  await safeExec('transactions.tax_amount', `ALTER TABLE transactions ADD COLUMN tax_amount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.tax_name', `ALTER TABLE transactions ADD COLUMN tax_name VARCHAR(50) DEFAULT NULL`);
+  await safeExec('transactions.tax_rate', `ALTER TABLE transactions ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`);
+  await safeExec('transactions.service_charge', `ALTER TABLE transactions ADD COLUMN service_charge DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.service_charge_rate', `ALTER TABLE transactions ADD COLUMN service_charge_rate DECIMAL(5,2) DEFAULT 0`);
+  await safeExec('Create settings', `CREATE TABLE IF NOT EXISTS settings (
+    id INT PRIMARY KEY DEFAULT 1, store_name VARCHAR(100) DEFAULT 'KasirPro',
+    store_address TEXT DEFAULT NULL, store_phone VARCHAR(20) DEFAULT NULL,
+    tax_enabled TINYINT(1) DEFAULT 0, tax_name VARCHAR(50) DEFAULT 'PB1',
+    tax_rate DECIMAL(5,2) DEFAULT 10.00, service_charge_enabled TINYINT(1) DEFAULT 0,
+    service_charge_rate DECIMAL(5,2) DEFAULT 5.00,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Default settings', `INSERT IGNORE INTO settings (id) VALUES (1)`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
   console.log('✅ Auto-migrate completed');
@@ -511,13 +539,39 @@ app.get('/api/products/barcode/:barcode', authenticateToken, async (req, res) =>
 
 // ============ TRANSACTION ROUTES ============
 
+// ============ SETTINGS ============
+app.get('/api/settings', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM settings WHERE id = 1');
+    res.json(rows[0] || {});
+  } catch (err) {
+    console.error('Get settings error:', err);
+    res.status(500).json({ error: 'Gagal mengambil settings.' });
+  }
+});
+
+app.put('/api/settings', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { store_name, store_address, store_phone, tax_enabled, tax_name, tax_rate, service_charge_enabled, service_charge_rate } = req.body;
+    await pool.query(
+      `UPDATE settings SET store_name=?, store_address=?, store_phone=?, tax_enabled=?, tax_name=?, tax_rate=?, service_charge_enabled=?, service_charge_rate=? WHERE id = 1`,
+      [store_name || 'KasirPro', store_address || null, store_phone || null, tax_enabled ? 1 : 0, tax_name || 'PB1', tax_rate || 10, service_charge_enabled ? 1 : 0, service_charge_rate || 5]
+    );
+    const [rows] = await pool.query('SELECT * FROM settings WHERE id = 1');
+    res.json({ message: 'Settings berhasil disimpan!', settings: rows[0] });
+  } catch (err) {
+    console.error('Update settings error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan settings.' });
+  }
+});
+
 // POST new transaction (updated with payment method, customer, discount)
 app.post('/api/transactions', authenticateToken, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
-    const { items, subtotal, discount, total, payment, change, payment_method, customer_id, customer_name, notes } = req.body;
+    const { items, subtotal, discount, total, payment, change, payment_method, customer_id, customer_name, notes, tax_amount, tax_name, tax_rate, service_charge, service_charge_rate } = req.body;
     const userId = req.user.id;
     const userName = req.user.name || req.user.username;
 
@@ -526,9 +580,9 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     }
 
     const [txResult] = await conn.query(
-      `INSERT INTO transactions (subtotal, discount, total, payment, \`change\`, payment_method, user_id, user_name, customer_id, customer_name, notes) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [subtotal || total, discount || 0, total, payment, change, payment_method || 'cash', userId, userName, customer_id || null, customer_name || null, notes || null]
+      `INSERT INTO transactions (subtotal, discount, total, payment, \`change\`, payment_method, user_id, user_name, customer_id, customer_name, notes, tax_amount, tax_name, tax_rate, service_charge, service_charge_rate) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [subtotal || total, discount || 0, total, payment, change, payment_method || 'cash', userId, userName, customer_id || null, customer_name || null, notes || null, tax_amount || 0, tax_name || null, tax_rate || 0, service_charge || 0, service_charge_rate || 0]
     );
 
     const txId = txResult.insertId;

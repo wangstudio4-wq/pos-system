@@ -954,6 +954,7 @@ const NAV_ITEMS = [
   { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
+  { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin','kasir'] },
 ];
 
@@ -993,6 +994,7 @@ function navigateTo(page) {
     shifts: renderShifts,
     reports: renderReports,
     users: renderUsers,
+    settings: renderSettings,
     password: renderPassword,
   };
   if (renderers[page]) renderers[page]();
@@ -1150,11 +1152,13 @@ async function renderPOS() {
   const main = document.getElementById('mainContent');
   main.innerHTML = loadingHtml();
   try {
-    const [prodData, catData, custData] = await Promise.all([
+    const [prodData, catData, custData, settingsData] = await Promise.all([
       apiFetch('/api/products'),
       apiFetch('/api/categories'),
-      apiFetch('/api/customers')
+      apiFetch('/api/customers'),
+      apiFetch('/api/settings').catch(() => ({}))
     ]);
+    appSettings = settingsData || {};
     posProducts = prodData.products || prodData || [];
     posCategories = catData.categories || catData || [];
     posCustomers = custData.customers || custData || [];
@@ -1310,11 +1314,19 @@ function updateCartUI() {
   if (cartEl) cartEl.outerHTML = renderCartPanel();
 }
 
+function calcTaxService(subtotal, totalDiscount) {
+  const afterDiscount = Math.max(subtotal - totalDiscount, 0);
+  let taxAmt = 0, serviceAmt = 0;
+  if (appSettings.tax_enabled) taxAmt = Math.round(afterDiscount * (appSettings.tax_rate || 0) / 100);
+  if (appSettings.service_charge_enabled) serviceAmt = Math.round(afterDiscount * (appSettings.service_charge_rate || 0) / 100);
+  return { afterDiscount, taxAmt, serviceAmt, grandTotal: afterDiscount + taxAmt + serviceAmt };
+}
+
 function renderCartPanel() {
   const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
-  const grandTotal = Math.max(subtotal - totalDiscount, 0);
+  const { afterDiscount, taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
 
   let html = '<div class="pos-cart" id="cartPanel">';
   html += '<div class="cart-header"><h3>🛒 Keranjang (' + cart.length + ' item)</h3></div>';
@@ -1355,6 +1367,12 @@ function renderCartPanel() {
   html += '<div class="cart-summary">';
   html += '<div class="summary-row"><span>Subtotal</span><span>' + formatRp(subtotal) + '</span></div>';
   html += '<div class="discount-input"><label>Diskon:</label><input type="number" id="cartDiscount" min="0" value="' + totalDiscount + '" onchange="updateCartUI()" placeholder="0"></div>';
+  if (appSettings.tax_enabled && taxAmt > 0) {
+    html += '<div class="summary-row"><span>' + escHtml(appSettings.tax_name || 'Pajak') + ' (' + appSettings.tax_rate + '%)</span><span>' + formatRp(taxAmt) + '</span></div>';
+  }
+  if (appSettings.service_charge_enabled && serviceAmt > 0) {
+    html += '<div class="summary-row"><span>Service (' + appSettings.service_charge_rate + '%)</span><span>' + formatRp(serviceAmt) + '</span></div>';
+  }
   html += '<div class="summary-row total"><span>TOTAL</span><span>' + formatRp(grandTotal) + '</span></div>';
 
   // Payment methods
@@ -1388,7 +1406,7 @@ function calcChange() {
   const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
-  const grandTotal = Math.max(subtotal - totalDiscount, 0);
+  const { grandTotal } = calcTaxService(subtotal, totalDiscount);
   const paid = Number(document.getElementById('paymentAmount')?.value) || 0;
   const change = paid - grandTotal;
   const el = document.getElementById('changeAmount');
@@ -1403,7 +1421,7 @@ async function processPayment() {
   const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
-  const grandTotal = Math.max(subtotal - totalDiscount, 0);
+  const { taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
 
   let payment = grandTotal;
   if (selectedPayMethod === 'Cash') {
@@ -1433,7 +1451,12 @@ async function processPayment() {
     payment_method: selectedPayMethod,
     customer_id: custId ? Number(custId) : null,
     customer_name: custName,
-    notes: notes
+    notes: notes,
+    tax_amount: taxAmt,
+    tax_name: appSettings.tax_enabled ? (appSettings.tax_name || 'Pajak') : null,
+    tax_rate: appSettings.tax_enabled ? (appSettings.tax_rate || 0) : 0,
+    service_charge: serviceAmt,
+    service_charge_rate: appSettings.service_charge_enabled ? (appSettings.service_charge_rate || 0) : 0
   };
 
   try {
@@ -1459,7 +1482,10 @@ function showReceipt(payload, result) {
   const now = new Date();
   let html = '<div class="modal-header"><h3>🧾 Struk Pembayaran</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
   html += '<div class="modal-body"><div class="receipt" id="receiptContent">';
-  html += '<div class="receipt-header"><h3>KasirPro</h3><p style="font-size:11px">Struk Pembayaran</p></div>';
+  const storeName = appSettings.store_name || 'KasirPro';
+  const storeAddr = appSettings.store_address ? '<p style="font-size:10px;margin:2px 0">' + escHtml(appSettings.store_address) + '</p>' : '';
+  const storePhone = appSettings.store_phone ? '<p style="font-size:10px;margin:2px 0">📞 ' + escHtml(appSettings.store_phone) + '</p>' : '';
+  html += '<div class="receipt-header"><h3>' + escHtml(storeName) + '</h3>' + storeAddr + storePhone + '<p style="font-size:11px">Struk Pembayaran</p></div>';
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-row"><span>No: #' + escHtml(String(txId)) + '</span><span>' + formatDateTime(now) + '</span></div>';
   html += '<div class="receipt-row"><span>Kasir: ' + escHtml(currentUser.name) + '</span></div>';
@@ -1475,6 +1501,12 @@ function showReceipt(payload, result) {
   html += '<div class="receipt-row"><span>Subtotal</span><span>' + formatRp(payload.subtotal) + '</span></div>';
   if (payload.discount > 0) {
     html += '<div class="receipt-row"><span>Diskon</span><span>-' + formatRp(payload.discount) + '</span></div>';
+  }
+  if (payload.tax_amount > 0) {
+    html += '<div class="receipt-row"><span>' + escHtml(payload.tax_name || 'Pajak') + ' (' + payload.tax_rate + '%)</span><span>' + formatRp(payload.tax_amount) + '</span></div>';
+  }
+  if (payload.service_charge > 0) {
+    html += '<div class="receipt-row"><span>Service (' + payload.service_charge_rate + '%)</span><span>' + formatRp(payload.service_charge) + '</span></div>';
   }
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-row receipt-total"><span>TOTAL</span><span>' + formatRp(payload.total) + '</span></div>';
@@ -2226,6 +2258,78 @@ async function deleteUser(id) {
     await apiFetch('/api/users/' + id, { method: 'DELETE' });
     showToast('User dihapus'); renderUsers();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ============ SETTINGS ============
+let appSettings = {};
+async function loadSettings() {
+  try {
+    const res = await apiFetch('/api/settings');
+    appSettings = res;
+  } catch(e) { appSettings = {}; }
+}
+
+async function renderSettings() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = '<div class="page-header"><h1>⚙️ Pengaturan</h1><p>Konfigurasi toko, pajak, dan service charge</p></div><div style="display:flex;gap:20px;flex-wrap:wrap"><div class="card" style="flex:1;min-width:300px" id="settingsLoading"><p>Memuat...</p></div></div>';
+  
+  try {
+    const s = await apiFetch('/api/settings');
+    appSettings = s;
+    
+    main.innerHTML = `
+    <div class="page-header"><h1>⚙️ Pengaturan</h1><p>Konfigurasi toko, pajak, dan service charge</p></div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap">
+      <div class="card" style="flex:1;min-width:300px">
+        <h3 style="margin-bottom:16px">🏪 Informasi Toko</h3>
+        <div class="form-group"><label>Nama Toko</label><input id="sStoreName" value="${escHtml(s.store_name||'KasirPro')}"></div>
+        <div class="form-group"><label>Alamat Toko</label><textarea id="sStoreAddr" rows="2">${escHtml(s.store_address||'')}</textarea></div>
+        <div class="form-group"><label>No. Telepon</label><input id="sStorePhone" value="${escHtml(s.store_phone||'')}"></div>
+      </div>
+      <div class="card" style="flex:1;min-width:300px">
+        <h3 style="margin-bottom:16px">💰 Pajak & Service Charge</h3>
+        <div class="form-group" style="display:flex;align-items:center;gap:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sTaxEnabled" ${s.tax_enabled ? 'checked' : ''} style="width:18px;height:18px"> Aktifkan Pajak
+          </label>
+        </div>
+        <div class="form-group" style="display:flex;gap:12px">
+          <div style="flex:1"><label>Nama Pajak</label><input id="sTaxName" value="${escHtml(s.tax_name||'PB1')}" placeholder="PB1/PPN"></div>
+          <div style="flex:1"><label>Rate (%)</label><input id="sTaxRate" type="number" step="0.5" min="0" max="100" value="${s.tax_rate||10}"></div>
+        </div>
+        <hr style="margin:16px 0;border-color:rgba(255,255,255,0.1)">
+        <div class="form-group" style="display:flex;align-items:center;gap:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sServiceEnabled" ${s.service_charge_enabled ? 'checked' : ''} style="width:18px;height:18px"> Aktifkan Service Charge
+          </label>
+        </div>
+        <div class="form-group"><label>Rate Service (%)</label><input id="sServiceRate" type="number" step="0.5" min="0" max="100" value="${s.service_charge_rate||5}"></div>
+        <button class="btn" onclick="saveSettings()" style="width:100%;margin-top:8px">💾 Simpan Pengaturan</button>
+      </div>
+    </div>`;
+  } catch(err) {
+    main.innerHTML = '<div class="card"><p style="color:#ef4444">Gagal memuat settings: ' + escHtml(err.message) + '</p></div>';
+  }
+}
+
+async function saveSettings() {
+  try {
+    const data = {
+      store_name: document.getElementById('sStoreName').value,
+      store_address: document.getElementById('sStoreAddr').value,
+      store_phone: document.getElementById('sStorePhone').value,
+      tax_enabled: document.getElementById('sTaxEnabled').checked,
+      tax_name: document.getElementById('sTaxName').value,
+      tax_rate: parseFloat(document.getElementById('sTaxRate').value) || 0,
+      service_charge_enabled: document.getElementById('sServiceEnabled').checked,
+      service_charge_rate: parseFloat(document.getElementById('sServiceRate').value) || 0,
+    };
+    const res = await apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(data) });
+    appSettings = res.settings;
+    showToast('Pengaturan berhasil disimpan! ✅');
+  } catch(err) {
+    showToast(err.message, 'error');
+  }
 }
 
 // ============ CHANGE PASSWORD ============
