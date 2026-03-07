@@ -834,4 +834,116 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
   }
 });
 
+// ============ PROFIT-LOSS REPORT ============
+app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { period, start_date, end_date } = req.query;
+    
+    let dateFilter = '';
+    let expDateFilter = '';
+    if (start_date && end_date) {
+      dateFilter = `AND t.created_at >= '${start_date} 00:00:00' AND t.created_at <= '${end_date} 23:59:59'`;
+      expDateFilter = `AND date >= '${start_date}' AND date <= '${end_date}'`;
+    } else if (period === 'today') {
+      dateFilter = 'AND DATE(t.created_at) = CURDATE()';
+      expDateFilter = 'AND date = CURDATE()';
+    } else if (period === 'week') {
+      dateFilter = 'AND t.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
+      expDateFilter = 'AND date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+    } else if (period === 'month') {
+      dateFilter = 'AND t.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+      expDateFilter = 'AND date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+    }
+
+    // Revenue & COGS from completed transactions
+    const [revenue] = await pool.query(
+      `SELECT COALESCE(SUM(t.total), 0) as total_revenue,
+              COALESCE(SUM(t.tax_amount), 0) as total_tax,
+              COALESCE(SUM(t.service_amount), 0) as total_service,
+              COALESCE(SUM(t.discount), 0) as total_discount,
+              COUNT(*) as total_transactions
+       FROM transactions t 
+       WHERE (t.status IS NULL OR t.status = 'completed') ${dateFilter}`
+    );
+
+    // HPP (Harga Pokok Penjualan / COGS)
+    const [cogs] = await pool.query(
+      `SELECT COALESCE(SUM(ti.cost_price * ti.qty), 0) as total_cogs
+       FROM transaction_items ti
+       JOIN transactions t ON ti.transaction_id = t.id
+       WHERE (t.status IS NULL OR t.status = 'completed') ${dateFilter}`
+    );
+
+    // Expenses
+    const [expenses] = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total_expenses
+       FROM expenses WHERE 1=1 ${expDateFilter}`
+    );
+
+    // Breakdown by product
+    const [byProduct] = await pool.query(
+      `SELECT ti.product_name, 
+              SUM(ti.qty) as total_qty,
+              SUM(ti.subtotal) as total_sales,
+              SUM(ti.cost_price * ti.qty) as total_cost,
+              SUM(ti.subtotal) - SUM(ti.cost_price * ti.qty) as profit
+       FROM transaction_items ti
+       JOIN transactions t ON ti.transaction_id = t.id
+       WHERE (t.status IS NULL OR t.status = 'completed') ${dateFilter}
+       GROUP BY ti.product_name 
+       ORDER BY profit DESC`
+    );
+
+    // Expenses by category
+    const [expByCategory] = await pool.query(
+      `SELECT category, COALESCE(SUM(amount), 0) as total
+       FROM expenses WHERE 1=1 ${expDateFilter}
+       GROUP BY category ORDER BY total DESC`
+    );
+
+    // Daily trend (last 30 days or period)
+    const [dailyTrend] = await pool.query(
+      `SELECT DATE(t.created_at) as date,
+              COALESCE(SUM(t.total), 0) as revenue,
+              COALESCE(SUM(ti_agg.cogs), 0) as cogs
+       FROM transactions t
+       LEFT JOIN (
+         SELECT transaction_id, SUM(cost_price * qty) as cogs
+         FROM transaction_items GROUP BY transaction_id
+       ) ti_agg ON ti_agg.transaction_id = t.id
+       WHERE (t.status IS NULL OR t.status = 'completed') ${dateFilter}
+       GROUP BY DATE(t.created_at)
+       ORDER BY date DESC LIMIT 30`
+    );
+
+    const totalRevenue = Number(revenue[0].total_revenue) || 0;
+    const totalCogs = Number(cogs[0].total_cogs) || 0;
+    const totalExpenses = Number(expenses[0].total_expenses) || 0;
+    const grossProfit = totalRevenue - totalCogs;
+    const netProfit = grossProfit - totalExpenses;
+
+    res.json({
+      summary: {
+        total_revenue: totalRevenue,
+        total_cogs: totalCogs,
+        gross_profit: grossProfit,
+        total_expenses: totalExpenses,
+        net_profit: netProfit,
+        total_transactions: revenue[0].total_transactions || 0,
+        total_tax: Number(revenue[0].total_tax) || 0,
+        total_service: Number(revenue[0].total_service) || 0,
+        total_discount: Number(revenue[0].total_discount) || 0,
+        margin_percent: totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(1) : 0
+      },
+      by_product: byProduct,
+      expenses_by_category: expByCategory,
+      daily_trend: dailyTrend
+    });
+  } catch (err) {
+    console.error('Profit-loss report error:', err);
+    res.status(500).json({ error: 'Gagal mengambil laporan laba rugi.' });
+  }
+});
+
+
 module.exports = app;

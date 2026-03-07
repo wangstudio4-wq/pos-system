@@ -662,6 +662,27 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 #barcodeScannerModal #qr-reader { width: 100%; border-radius: 12px; overflow: hidden; }
 .p-barcode { font-size: 10px; color: #999; font-family: monospace; margin-top: 2px; }
 
+
+/* Profit Loss Report */
+.pl-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.pl-card { padding: 16px; border-radius: 14px; text-align: center; }
+.pl-card .pl-value { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.pl-card .pl-label { font-size: 12px; opacity: 0.8; }
+.pl-revenue { background: linear-gradient(135deg, #415D43, #709775); color: #fff; }
+.pl-cogs { background: linear-gradient(135deg, #92400e, #d97706); color: #fff; }
+.pl-gross { background: linear-gradient(135deg, #065f46, #10b981); color: #fff; }
+.pl-expense { background: linear-gradient(135deg, #991b1b, #ef4444); color: #fff; }
+.pl-net-profit { background: linear-gradient(135deg, #111D13, #415D43); color: #fff; padding: 20px; }
+.pl-net-profit .pl-value { font-size: 28px; }
+.pl-net-loss { background: linear-gradient(135deg, #450a0a, #dc2626); color: #fff; padding: 20px; }
+.pl-net-loss .pl-value { font-size: 28px; }
+.pl-margin { display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; margin-top: 6px; }
+.profit-positive { color: #10b981; font-weight: 700; }
+.profit-negative { color: #ef4444; font-weight: 700; }
+.pl-waterfall { display: flex; align-items: flex-end; gap: 4px; height: 120px; margin: 16px 0; }
+.pl-bar { flex: 1; border-radius: 6px 6px 0 0; min-width: 30px; position: relative; transition: all 0.3s; }
+.pl-bar:hover { opacity: 0.8; }
+.pl-bar-label { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; white-space: nowrap; color: #666; }
 </style>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
@@ -1088,6 +1109,7 @@ const NAV_ITEMS = [
   { id: 'expenses', icon: '💸', label: 'Pengeluaran', roles: ['owner','admin'] },
   { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
+  { id: 'profitloss', icon: '💹', label: 'Laba Rugi', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin','kasir'] },
@@ -1128,6 +1150,7 @@ function navigateTo(page) {
     expenses: renderExpenses,
     shifts: renderShifts,
     reports: renderReports,
+    profitloss: renderProfitLoss,
     users: renderUsers,
     settings: renderSettings,
     password: renderPassword,
@@ -2331,6 +2354,117 @@ async function renderReports() {
 
     main.innerHTML = html;
   } catch (err) { main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat: ' + escHtml(err.message) + '</div>'; }
+}
+
+
+// ============ LABA RUGI ============
+let plPeriod = 'month';
+
+async function renderProfitLoss() {
+  const main = document.getElementById('mainContent');
+  try {
+    const data = await apiFetch('/api/reports/profit-loss?period=' + plPeriod);
+    const s = data.summary || {};
+    const byProduct = data.by_product || [];
+    const expByCat = data.expenses_by_category || [];
+    const trend = (data.daily_trend || []).reverse();
+
+    let html = '<div class="page-header"><h1>💹 Laporan Laba Rugi</h1><p>Analisis profitabilitas bisnis Anda</p></div>';
+
+    // Period filter
+    html += '<div class="toolbar"><div class="category-pills">';
+    [['today','Hari Ini'],['week','7 Hari'],['month','30 Hari'],['all','Semua']].forEach(([val, label]) => {
+      html += '<div class="category-pill' + (plPeriod === val ? ' active' : '') + '" onclick="changePLPeriod(\'' + val + '\')">' + label + '</div>';
+    });
+    html += '</div></div>';
+
+    // Summary cards - waterfall style
+    html += '<div class="pl-summary">';
+    html += '<div class="pl-card pl-revenue"><div class="pl-value">' + formatRp(s.total_revenue) + '</div><div class="pl-label">💰 Pendapatan</div></div>';
+    html += '<div class="pl-card pl-cogs"><div class="pl-value">' + formatRp(s.total_cogs) + '</div><div class="pl-label">📦 HPP (Modal)</div></div>';
+    html += '<div class="pl-card pl-gross"><div class="pl-value">' + formatRp(s.gross_profit) + '</div><div class="pl-label">📊 Laba Kotor</div><div class="pl-margin">Margin ' + (s.margin_percent || 0) + '%</div></div>';
+    html += '<div class="pl-card pl-expense"><div class="pl-value">' + formatRp(s.total_expenses) + '</div><div class="pl-label">💸 Pengeluaran</div></div>';
+    
+    const isProfit = (s.net_profit || 0) >= 0;
+    html += '<div class="pl-card ' + (isProfit ? 'pl-net-profit' : 'pl-net-loss') + '">';
+    html += '<div class="pl-value">' + (isProfit ? '' : '-') + formatRp(Math.abs(s.net_profit || 0)) + '</div>';
+    html += '<div class="pl-label">' + (isProfit ? '🎉 LABA BERSIH' : '😞 RUGI BERSIH') + '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    // Detail breakdown
+    html += '<div class="card mt-4"><div class="card-header"><h3>📋 Rincian Laba Rugi</h3></div>';
+    html += '<div style="padding:16px"><table style="width:100%;border-collapse:collapse">';
+    html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">💰 PENDAPATAN</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px">' + formatRp(s.total_revenue) + '</td></tr>';
+    if (Number(s.total_discount) > 0) html += '<tr style="color:#999"><td style="padding:6px 0 6px 20px">Diskon</td><td style="text-align:right">-' + formatRp(s.total_discount) + '</td></tr>';
+    if (Number(s.total_tax) > 0) html += '<tr style="color:#999"><td style="padding:6px 0 6px 20px">Termasuk Pajak</td><td style="text-align:right">' + formatRp(s.total_tax) + '</td></tr>';
+    if (Number(s.total_service) > 0) html += '<tr style="color:#999"><td style="padding:6px 0 6px 20px">Termasuk Service</td><td style="text-align:right">' + formatRp(s.total_service) + '</td></tr>';
+    html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">📦 HPP (Harga Pokok Penjualan)</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#d97706">-' + formatRp(s.total_cogs) + '</td></tr>';
+    html += '<tr style="border-bottom:2px solid var(--primary);background:rgba(65,93,67,0.05)"><td style="padding:12px 0;font-weight:800;font-size:16px">📊 LABA KOTOR</td><td style="text-align:right;padding:12px 0;font-weight:800;font-size:16px;color:#10b981">' + formatRp(s.gross_profit) + ' <small style="font-weight:500">(' + (s.margin_percent||0) + '%)</small></td></tr>';
+    html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">💸 PENGELUARAN</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#ef4444">-' + formatRp(s.total_expenses) + '</td></tr>';
+    
+    // Expense breakdown
+    expByCat.forEach(e => {
+      html += '<tr style="color:#999"><td style="padding:4px 0 4px 20px">' + escHtml(e.category || 'Lainnya') + '</td><td style="text-align:right">-' + formatRp(e.total) + '</td></tr>';
+    });
+    
+    html += '<tr style="background:' + (isProfit ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)') + '"><td style="padding:14px 0;font-weight:800;font-size:18px">' + (isProfit ? '🎉' : '😞') + ' LABA BERSIH</td><td style="text-align:right;padding:14px 0;font-weight:800;font-size:18px;color:' + (isProfit ? '#10b981' : '#ef4444') + '">' + (isProfit ? '' : '-') + formatRp(Math.abs(s.net_profit||0)) + '</td></tr>';
+    html += '</table></div></div>';
+
+    // Profit by product
+    html += '<div class="dash-grid mt-4">';
+    html += '<div class="card"><div class="card-header"><h3>🏆 Profit per Produk</h3></div>';
+    if (byProduct.length > 0) {
+      html += '<div class="overflow-x"><table><thead><tr><th>Produk</th><th>Qty</th><th>Penjualan</th><th>Modal</th><th>Profit</th><th>Margin</th></tr></thead><tbody>';
+      byProduct.forEach(p => {
+        const profit = Number(p.profit) || 0;
+        const margin = Number(p.total_sales) > 0 ? ((profit / Number(p.total_sales)) * 100).toFixed(1) : 0;
+        const cls = profit >= 0 ? 'profit-positive' : 'profit-negative';
+        html += '<tr><td><strong>' + escHtml(p.product_name) + '</strong></td>' +
+          '<td>' + (p.total_qty||0) + '</td>' +
+          '<td>' + formatRp(p.total_sales) + '</td>' +
+          '<td>' + formatRp(p.total_cost) + '</td>' +
+          '<td class="' + cls + '">' + (profit >= 0 ? '+' : '') + formatRp(profit) + '</td>' +
+          '<td class="' + cls + '">' + margin + '%</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else { html += emptyHtml('🏆', 'Tidak ada data produk'); }
+    html += '</div>';
+
+    // Expenses by category
+    html += '<div class="card"><div class="card-header"><h3>💸 Pengeluaran per Kategori</h3></div>';
+    if (expByCat.length > 0) {
+      html += '<div class="overflow-x"><table><thead><tr><th>Kategori</th><th>Total</th><th>%</th></tr></thead><tbody>';
+      const totalExp = Number(s.total_expenses) || 1;
+      expByCat.forEach(e => {
+        const pct = ((Number(e.total) / totalExp) * 100).toFixed(1);
+        html += '<tr><td><strong>' + escHtml(e.category || 'Lainnya') + '</strong></td><td>' + formatRp(e.total) + '</td><td>' + pct + '%</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else { html += emptyHtml('💸', 'Tidak ada pengeluaran'); }
+    html += '</div>';
+    html += '</div>'; // end dash-grid
+
+    // Daily trend
+    if (trend.length > 1) {
+      html += '<div class="card mt-4"><div class="card-header"><h3>📈 Trend Harian</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Tanggal</th><th>Pendapatan</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>';
+      trend.forEach(d => {
+        const gp = Number(d.revenue) - Number(d.cogs);
+        html += '<tr><td>' + escHtml(d.date) + '</td><td>' + formatRp(d.revenue) + '</td><td>' + formatRp(d.cogs) + '</td><td class="' + (gp >= 0 ? 'profit-positive' : 'profit-negative') + '">' + (gp >= 0 ? '+' : '') + formatRp(gp) + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    }
+
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat laporan: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+function changePLPeriod(p) {
+  plPeriod = p;
+  renderProfitLoss();
 }
 
 function changeReportPeriod(p) {
