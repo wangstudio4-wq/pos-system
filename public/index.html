@@ -678,28 +678,30 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 }
 #barcodeScannerModal {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8); z-index: 10000;
+  background: rgba(0,0,0,0.85); z-index: 99999;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer;
 }
 #barcodeScannerModal .scanner-box {
   background: #fff; border-radius: 16px; padding: 20px; width: 90%; max-width: 400px;
+  position: relative; z-index: 100000; cursor: default;
 }
 #barcodeScannerModal .scanner-header {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
 }
-#barcodeScannerModal .scanner-header h3 { margin: 0; font-size: 16px; }
+#barcodeScannerModal .scanner-header h3 { margin: 0; font-size: 16px; color: #415D43; }
 #barcodeScannerModal .close-scanner {
-  background: #f3f4f6; border: none; font-size: 22px; cursor: pointer; color: #333;
-  width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s;
+  background: #ef4444; border: none; font-size: 22px; cursor: pointer; color: #fff;
+  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s; z-index: 100001; position: relative;
 }
-#barcodeScannerModal .close-scanner:hover { background: #ef4444; color: #fff; }
+#barcodeScannerModal .close-scanner:hover { background: #dc2626; color: #fff; transform: scale(1.1); }
 #barcodeScannerModal .close-btn-bottom {
-  display: block; width: 100%; margin-top: 12px; padding: 10px; border: none;
-  background: #f3f4f6; border-radius: 10px; font-size: 14px; font-weight: 600;
-  cursor: pointer; color: #333; transition: all 0.2s;
+  display: block; width: 100%; margin-top: 12px; padding: 14px; border: none;
+  background: #ef4444; border-radius: 10px; font-size: 16px; font-weight: 600;
+  cursor: pointer; color: #fff; transition: all 0.2s; z-index: 100001; position: relative;
 }
-#barcodeScannerModal .close-btn-bottom:hover { background: #ef4444; color: #fff; }
+#barcodeScannerModal .close-btn-bottom:hover { background: #dc2626; color: #fff; }
 #barcodeScannerModal #qr-reader { width: 100%; border-radius: 12px; overflow: hidden; }
 .p-barcode { font-size: 10px; color: #999; font-family: monospace; margin-top: 2px; }
 
@@ -1509,43 +1511,69 @@ function handlePosSearch(e) {
 // Camera scanner using html5-qrcode
 let html5QrScanner = null;
 
+var scannerBusy = false;
+
 function openCameraScanner() {
+  scannerBusy = false;
   const modal = document.createElement('div');
   modal.id = 'barcodeScannerModal';
+  modal.className = 'scanner-overlay';
   modal.onclick = function(e) { if (e.target === modal) closeCameraScanner(); };
   modal.innerHTML = '<div class="scanner-box">' +
     '<div class="scanner-header"><h3>📷 Scan Barcode</h3><button class="close-scanner" onclick="closeCameraScanner()">✕</button></div>' +
     '<div id="qr-reader"></div>' +
     '<p style="text-align:center;margin-top:10px;font-size:13px;color:#666">Arahkan kamera ke barcode produk</p>' +
-    '<button class="close-btn-bottom" onclick="closeCameraScanner()">✖ Tutup</button>' +
+    '<button class="close-btn-bottom" onclick="closeCameraScanner()">✖ Tutup Kamera</button>' +
     '</div>';
   document.body.appendChild(modal);
+  // Force display
+  setTimeout(() => { modal.style.display = 'flex'; }, 10);
 
   if (typeof Html5Qrcode !== 'undefined') {
     html5QrScanner = new Html5Qrcode('qr-reader');
     html5QrScanner.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 280, height: 150 } },
-      async (decodedText) => {
-        html5QrScanner.stop().catch(() => {});
-        closeCameraScanner();
-        const found = await handleBarcodeHit(decodedText);
-        if (!found) showToast('Produk dengan barcode ' + decodedText + ' tidak ditemukan', 'warning');
-        refocusBarcodeInput();
+      (decodedText) => {
+        if (scannerBusy) return; // prevent double scan
+        scannerBusy = true;
+        // Stop scanner first, then close modal & process
+        const scanner = html5QrScanner;
+        html5QrScanner = null;
+        (scanner ? scanner.stop() : Promise.resolve()).catch(() => {}).finally(async () => {
+          forceRemoveModal();
+          const found = await handleBarcodeHit(decodedText);
+          if (!found) showToast('Produk dengan barcode ' + decodedText + ' tidak ditemukan', 'warning');
+          refocusBarcodeInput();
+        });
       },
       () => {} // ignore errors
     ).catch(err => {
-      document.getElementById('qr-reader').innerHTML = '<p style="text-align:center;padding:20px;color:#ef4444">Kamera tidak tersedia.<br>Pastikan izin kamera diaktifkan.</p>';
+      const reader = document.getElementById('qr-reader');
+      if (reader) reader.innerHTML = '<p style="text-align:center;padding:20px;color:#ef4444">Kamera tidak tersedia.<br>Pastikan izin kamera diaktifkan.</p>';
     });
   } else {
     document.getElementById('qr-reader').innerHTML = '<p style="text-align:center;padding:20px;color:#ef4444">Library scanner tidak dimuat.</p>';
   }
 }
 
-function closeCameraScanner() {
-  if (html5QrScanner) { html5QrScanner.stop().catch(() => {}); html5QrScanner = null; }
+function forceRemoveModal() {
   const modal = document.getElementById('barcodeScannerModal');
   if (modal) modal.remove();
+  // Cleanup any leftover video streams
+  document.querySelectorAll('video').forEach(v => {
+    if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); }
+  });
+}
+
+function closeCameraScanner() {
+  const scanner = html5QrScanner;
+  html5QrScanner = null;
+  if (scanner) {
+    scanner.stop().catch(() => {}).finally(() => { forceRemoveModal(); });
+  } else {
+    forceRemoveModal();
+  }
   refocusBarcodeInput();
 }
 
