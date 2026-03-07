@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MajooKasir - Sistem POS</title>
+<title>KasirPro - Sistem POS</title>
 <style>
 :root {
   --primary: #2563eb;
@@ -398,7 +398,7 @@ tbody tr:hover { background: #f9fafb; }
 <!-- Login Page -->
 <div id="loginPage">
   <div class="login-card">
-    <h1>🏪 MajooKasir</h1>
+    <h1>🏪 KasirPro</h1>
     <p class="subtitle">Sistem Point of Sale Modern</p>
     <form id="loginForm">
       <div class="form-group">
@@ -419,7 +419,7 @@ tbody tr:hover { background: #f9fafb; }
   <!-- Mobile Header -->
   <div class="mobile-header">
     <button onclick="toggleSidebar()">☰</button>
-    <span style="font-weight:700">🏪 MajooKasir</span>
+    <span style="font-weight:700">🏪 KasirPro</span>
     <span></span>
   </div>
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
@@ -428,7 +428,7 @@ tbody tr:hover { background: #f9fafb; }
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <h2>🏪 MajooKasir</h2>
+        <h2>🏪 KasirPro</h2>
         <small>Sistem Point of Sale</small>
       </div>
       <nav class="sidebar-nav" id="sidebarNav"></nav>
@@ -1077,7 +1077,7 @@ function showReceipt(payload, result) {
   const now = new Date();
   let html = '<div class="modal-header"><h3>🧾 Struk Pembayaran</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
   html += '<div class="modal-body"><div class="receipt" id="receiptContent">';
-  html += '<div class="receipt-header"><h3>MajooKasir</h3><p style="font-size:11px">Struk Pembayaran</p></div>';
+  html += '<div class="receipt-header"><h3>KasirPro</h3><p style="font-size:11px">Struk Pembayaran</p></div>';
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-row"><span>No: #' + escHtml(String(txId)) + '</span><span>' + formatDateTime(now) + '</span></div>';
   html += '<div class="receipt-row"><span>Kasir: ' + escHtml(currentUser.name) + '</span></div>';
@@ -1101,7 +1101,7 @@ function showReceipt(payload, result) {
     html += '<div class="receipt-row"><span>Kembalian</span><span>' + formatRp(payload.change) + '</span></div>';
   }
   html += '<div class="receipt-divider"></div>';
-  html += '<div class="receipt-footer">Terima kasih telah berbelanja!<br>Powered by MajooKasir</div>';
+  html += '<div class="receipt-footer">Terima kasih telah berbelanja!<br>Powered by KasirPro</div>';
   html += '</div></div>';
   html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button><button class="btn btn-primary" onclick="printReceipt()">🖨️ Cetak</button></div>';
 
@@ -1688,7 +1688,7 @@ async function showTransactionDetail(id) {
     const items = data.items || tx.items || [];
     let html = '<div class="modal-header"><h3>🧾 Detail Transaksi #' + escHtml(String(tx.id)) + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
     html += '<div class="modal-body"><div class="receipt">';
-    html += '<div class="receipt-header"><h3>MajooKasir</h3></div>';
+    html += '<div class="receipt-header"><h3>KasirPro</h3></div>';
     html += '<div class="receipt-divider"></div>';
     html += '<div class="receipt-row"><span>Tanggal</span><span>' + formatDateTime(tx.created_at || tx.date) + '</span></div>';
     html += '<div class="receipt-row"><span>Kasir</span><span>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</span></div>';
