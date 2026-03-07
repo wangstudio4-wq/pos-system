@@ -228,6 +228,57 @@ app.get('/api/debug/schema', authenticateToken, async (req, res) => {
 });
 
 // ============ AUTO MIGRATION ============
+// Run migration on startup
+async function runAutoMigrate() {
+  const safeExec = async (label, sql) => {
+    try { await pool.query(sql); console.log(`✅ ${label}`); }
+    catch (e) { console.log(`⚠️ ${label}: ${e.message}`); }
+  };
+
+  await safeExec('Create categories', `CREATE TABLE IF NOT EXISTS categories (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    color VARCHAR(7) DEFAULT '#2563eb', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create customers', `CREATE TABLE IF NOT EXISTS customers (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) DEFAULT NULL, email VARCHAR(100) DEFAULT NULL,
+    address TEXT DEFAULT NULL, points INT DEFAULT 0,
+    total_transactions INT DEFAULT 0, total_spent DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Create shifts', `CREATE TABLE IF NOT EXISTS shifts (
+    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+    user_name VARCHAR(100) NOT NULL, opening_cash DECIMAL(15,2) DEFAULT 0,
+    closing_cash DECIMAL(15,2) DEFAULT NULL, expected_cash DECIMAL(15,2) DEFAULT NULL,
+    total_sales DECIMAL(15,2) DEFAULT 0, total_transactions INT DEFAULT 0,
+    notes TEXT DEFAULT NULL, status ENUM('open','closed') DEFAULT 'open',
+    opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, closed_at TIMESTAMP DEFAULT NULL)`);
+  await safeExec('Create expenses', `CREATE TABLE IF NOT EXISTS expenses (
+    id INT AUTO_INCREMENT PRIMARY KEY, category VARCHAR(50) NOT NULL,
+    description TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) NOT NULL,
+    date DATE DEFAULT (CURRENT_DATE), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
+  await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
+  await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
+  await safeExec('transactions.payment_method', `ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash'`);
+  await safeExec('transactions.customer_id', `ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL`);
+  await safeExec('transactions.customer_name', `ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.discount', `ALTER TABLE transactions ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.subtotal', `ALTER TABLE transactions ADD COLUMN subtotal DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.notes', `ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL`);
+  await safeExec('transactions.user_name', `ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.created_at', `ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+  await safeExec('transaction_items.discount', `ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.status', `ALTER TABLE transactions ADD COLUMN status VARCHAR(20) DEFAULT 'completed'`);
+  await safeExec('transactions.void_reason', `ALTER TABLE transactions ADD COLUMN void_reason TEXT DEFAULT NULL`);
+  await safeExec('transactions.voided_by', `ALTER TABLE transactions ADD COLUMN voided_by VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.voided_at', `ALTER TABLE transactions ADD COLUMN voided_at TIMESTAMP NULL DEFAULT NULL`);
+  await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
+    (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
+  console.log('✅ Auto-migrate completed');
+}
+runAutoMigrate().catch(err => console.error('Migration error:', err));
+
 app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (req, res) => {
   const results = [];
   const safeExec = async (label, sql) => {
