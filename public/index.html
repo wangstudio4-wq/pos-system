@@ -55,6 +55,132 @@ th { background: #f8fafc; font-weight: 600; font-size: 12px; color: var(--text-s
 tbody tr { transition: var(--transition); }
 tbody tr:hover { background: #f8fafc; }
 
+/* ====== HOLD ORDER ====== */
+.cart-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+.btn-held-list {
+  background: var(--warning-bg);
+  color: #92400e;
+  border: 1.5px solid #f59e0b;
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.btn-held-list:hover {
+  background: #f59e0b;
+  color: #fff;
+}
+.held-badge {
+  background: #ef4444;
+  color: #fff;
+  border-radius: 99px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  min-width: 18px;
+  justify-content: center;
+}
+.cart-action-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn-hold {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  height: 46px;
+  background: var(--warning-bg);
+  color: #92400e;
+  border: 1.5px solid #f59e0b;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.btn-hold:hover:not(:disabled) {
+  background: #f59e0b;
+  color: #fff;
+}
+.btn-hold:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-pay {
+  flex: 1;
+}
+.held-orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.held-order-item {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition: var(--transition);
+}
+.held-order-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.held-order-info {
+  flex: 1;
+  min-width: 0;
+}
+.held-order-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.held-order-items {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.held-order-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.held-order-total {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.held-order-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.held-order-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -1348,6 +1474,7 @@ let cart = [];
 let selectedCategory = null;
 let selectedPayMethod = 'Cash';
 let posSearchTerm = '';
+let heldOrders = JSON.parse(localStorage.getItem('kasirpro_held_orders') || '[]');
 
 async function renderPOS() {
   const main = document.getElementById('mainContent');
@@ -1645,7 +1772,13 @@ function renderCartPanel() {
   const { afterDiscount, taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
 
   let html = '<div class="pos-cart" id="cartPanel">';
-  html += '<div class="cart-header"><h3>🛒 Keranjang (' + cart.length + ' item)</h3></div>';
+  html += '<div class="cart-header">' +
+    '<h3>🛒 Keranjang (' + cart.length + ' item)</h3>' +
+    '<button class="btn-held-list" onclick="showHeldOrders()" title="Lihat order tertahan">' +
+      '⏸️ Tahan' +
+      (heldOrders.length > 0 ? ' <span class="held-badge" id="heldBadge">' + heldOrders.length + '</span>' : '<span class="held-badge" id="heldBadge" style="display:none">0</span>') +
+    '</button>' +
+  '</div>';
 
   // Customer selector
   html += '<div class="cart-customer"><select id="cartCustomer"><option value="">Umum (Tanpa Pelanggan)</option>';
@@ -1707,7 +1840,10 @@ function renderCartPanel() {
   // Notes
   html += '<div class="cart-notes"><textarea id="cartNotes" placeholder="Catatan (opsional)..."></textarea></div>';
 
+  html += '<div class="cart-action-row">';
+  html += '<button class="btn-hold" onclick="holdOrder()"' + (cart.length === 0 ? ' disabled' : '') + '>⏸️ Tahan</button>';
   html += '<button class="btn-pay" onclick="processPayment()"' + (cart.length === 0 ? ' disabled' : '') + '>💳 Bayar ' + formatRp(grandTotal) + '</button>';
+  html += '</div>';
   html += '</div></div>';
 
   return html;
@@ -1867,6 +2003,117 @@ function closePrintOverlay() {
   const overlay = document.getElementById('printOverlay');
   if (overlay) overlay.remove();
   document.body.classList.remove('printing-mode');
+}
+
+// ============ HOLD ORDER ============
+function saveHeldOrders() {
+  localStorage.setItem('kasirpro_held_orders', JSON.stringify(heldOrders));
+}
+
+function holdOrder() {
+  if (cart.length === 0) { showToast('Keranjang kosong!', 'warning'); return; }
+  const discountEl = document.getElementById('cartDiscount');
+  const notesEl = document.getElementById('cartNotes');
+  const custEl = document.getElementById('cartCustomer');
+  const totalDiscount = discountEl ? (Number(discountEl.value) || 0) : 0;
+  const notes = notesEl ? notesEl.value : '';
+  const custId = custEl ? custEl.value : '';
+  const custName = (custEl && custId) ? custEl.options[custEl.selectedIndex].textContent.split(' - ')[0].trim() : 'Umum';
+
+  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
+  const { grandTotal } = calcTaxService(subtotal, totalDiscount);
+
+  const orderNum = heldOrders.length + 1;
+  heldOrders.push({
+    id: Date.now(),
+    label: 'Order #' + orderNum,
+    items: cart.map(c => ({ ...c })),
+    discount: totalDiscount,
+    notes,
+    custId,
+    custName,
+    total: grandTotal,
+    time: new Date().toISOString()
+  });
+  saveHeldOrders();
+  cart = [];
+  updateCartUI();
+  showToast('Order ditahan! ⏸️', 'success');
+  updateHeldBadge();
+}
+
+function updateHeldBadge() {
+  const badge = document.getElementById('heldBadge');
+  if (badge) {
+    badge.textContent = heldOrders.length;
+    badge.style.display = heldOrders.length > 0 ? 'inline-flex' : 'none';
+  }
+}
+
+function showHeldOrders() {
+  if (heldOrders.length === 0) {
+    showToast('Tidak ada order tertahan', 'warning');
+    return;
+  }
+  let html = '<div class="modal-header"><h3>⏸️ Order Tertahan (' + heldOrders.length + ')</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body"><div class="held-orders-list">';
+  heldOrders.forEach((o, idx) => {
+    const itemNames = o.items.slice(0, 2).map(i => escHtml(i.name)).join(', ') + (o.items.length > 2 ? ', +' + (o.items.length - 2) + ' lagi' : '');
+    html += '<div class="held-order-item">' +
+      '<div class="held-order-info">' +
+        '<div class="held-order-label"><strong>' + escHtml(o.label) + '</strong>' +
+          (o.custName && o.custName !== 'Umum' ? ' &nbsp;·&nbsp; 👤 ' + escHtml(o.custName) : '') +
+        '</div>' +
+        '<div class="held-order-items">🛍️ ' + itemNames + '</div>' +
+        '<div class="held-order-meta">' +
+          '<span class="held-order-total">' + formatRp(o.total) + '</span>' +
+          '<span class="held-order-time">🕐 ' + formatDateTime(o.time) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="held-order-actions">' +
+        '<button class="btn btn-primary" style="padding:6px 12px;font-size:13px" onclick="resumeHeldOrder(' + idx + ')">▶️ Lanjut</button>' +
+        '<button class="btn btn-danger" style="padding:6px 10px;font-size:13px" onclick="deleteHeldOrder(' + idx + ')">🗑️</button>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '</div></div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>';
+  openModal(html);
+}
+
+function resumeHeldOrder(idx) {
+  if (cart.length > 0) {
+    if (!confirm('Keranjang saat ini akan diganti dengan order tertahan ini. Lanjutkan?')) return;
+  }
+  const order = heldOrders[idx];
+  cart = order.items.map(c => ({ ...c }));
+  heldOrders.splice(idx, 1);
+  saveHeldOrders();
+  closeModal();
+  updateCartUI();
+  setTimeout(() => {
+    const discountEl = document.getElementById('cartDiscount');
+    if (discountEl) { discountEl.value = order.discount || 0; }
+    const notesEl = document.getElementById('cartNotes');
+    if (notesEl) { notesEl.value = order.notes || ''; }
+    const custEl = document.getElementById('cartCustomer');
+    if (custEl && order.custId) { custEl.value = order.custId; }
+  }, 80);
+  showToast('Order dilanjutkan! ▶️', 'success');
+  updateHeldBadge();
+}
+
+function deleteHeldOrder(idx) {
+  if (!confirm('Hapus order tertahan ini?')) return;
+  heldOrders.splice(idx, 1);
+  saveHeldOrders();
+  updateHeldBadge();
+  if (heldOrders.length === 0) {
+    closeModal();
+    showToast('Order tertahan dihapus', 'success');
+  } else {
+    showHeldOrders();
+  }
 }
 
 // ============ PRODUCTS ============
