@@ -24,6 +24,190 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/shifts', shiftRoutes);
 
+// ============ SETUP: Auto-init database ============
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../middleware/auth');
+
+// Check setup status (no auth needed)
+app.get('/api/setup/status', async (req, res) => {
+  try {
+    // Check if users table exists and has users
+    let tablesReady = false;
+    let hasUsers = false;
+    try {
+      const [rows] = await pool.query('SELECT COUNT(*) as cnt FROM users');
+      tablesReady = true;
+      hasUsers = rows[0].cnt > 0;
+    } catch (e) {
+      tablesReady = false;
+    }
+    res.json({ tablesReady, hasUsers });
+  } catch (err) {
+    res.json({ tablesReady: false, hasUsers: false });
+  }
+});
+
+// Auto-init database tables
+app.post('/api/setup/init', async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    try {
+      // Core tables
+      await conn.query(`CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        role ENUM('owner','admin','kasir') DEFAULT 'kasir',
+        is_active TINYINT(1) DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        color VARCHAR(7) DEFAULT '#2563eb',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS products (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        price DECIMAL(15,2) NOT NULL,
+        stock INT DEFAULT 0,
+        category_id INT DEFAULT NULL,
+        image_url VARCHAR(500) DEFAULT NULL,
+        min_stock INT DEFAULT 5,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS customers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) DEFAULT NULL,
+        email VARCHAR(100) DEFAULT NULL,
+        address TEXT DEFAULT NULL,
+        points INT DEFAULT 0,
+        total_transactions INT DEFAULT 0,
+        total_spent DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        user_name VARCHAR(100) DEFAULT NULL,
+        total DECIMAL(15,2) NOT NULL,
+        payment_method VARCHAR(20) DEFAULT 'cash',
+        customer_id INT DEFAULT NULL,
+        customer_name VARCHAR(100) DEFAULT NULL,
+        discount DECIMAL(15,2) DEFAULT 0,
+        subtotal DECIMAL(15,2) DEFAULT 0,
+        notes TEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS transaction_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        transaction_id INT NOT NULL,
+        product_id INT NOT NULL,
+        product_name VARCHAR(100) NOT NULL,
+        price DECIMAL(15,2) NOT NULL,
+        quantity INT NOT NULL,
+        subtotal DECIMAL(15,2) NOT NULL,
+        discount DECIMAL(15,2) DEFAULT 0
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS shifts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        user_name VARCHAR(100) NOT NULL,
+        opening_cash DECIMAL(15,2) DEFAULT 0,
+        closing_cash DECIMAL(15,2) DEFAULT NULL,
+        expected_cash DECIMAL(15,2) DEFAULT NULL,
+        total_sales DECIMAL(15,2) DEFAULT 0,
+        total_transactions INT DEFAULT 0,
+        notes TEXT DEFAULT NULL,
+        status ENUM('open','closed') DEFAULT 'open',
+        opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        closed_at TIMESTAMP DEFAULT NULL
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category VARCHAR(50) NOT NULL,
+        description TEXT NOT NULL,
+        amount DECIMAL(15,2) NOT NULL,
+        user_id INT NOT NULL,
+        user_name VARCHAR(100) NOT NULL,
+        date DATE DEFAULT (CURRENT_DATE),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      // Default categories
+      await conn.query(`INSERT IGNORE INTO categories (id, name, color) VALUES
+        (1, 'Makanan', '#ef4444'),
+        (2, 'Minuman', '#3b82f6'),
+        (3, 'Snack', '#f59e0b'),
+        (4, 'Lainnya', '#6b7280')`);
+
+      conn.release();
+      res.json({ success: true, message: 'Database berhasil diinisialisasi!' });
+    } catch (e) {
+      conn.release();
+      throw e;
+    }
+  } catch (err) {
+    console.error('Setup init error:', err);
+    res.status(500).json({ error: 'Gagal inisialisasi database: ' + err.message });
+  }
+});
+
+// Register first owner (only if no users exist)
+app.post('/api/auth/register-owner', async (req, res) => {
+  try {
+    const { name, username, password, store_name } = req.body;
+    if (!name || !username || !password) {
+      return res.status(400).json({ error: 'Nama, username, dan password wajib diisi.' });
+    }
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'Password minimal 4 karakter.' });
+    }
+
+    // Check if any user exists
+    const [existing] = await pool.query('SELECT COUNT(*) as cnt FROM users');
+    if (existing[0].cnt > 0) {
+      return res.status(400).json({ error: 'Owner sudah terdaftar. Silakan login.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const [result] = await pool.query(
+      'INSERT INTO users (username, password, name, role, is_active) VALUES (?, ?, ?, ?, 1)',
+      [username, hashedPassword, name, 'owner']
+    );
+
+    const token = jwt.sign(
+      { id: result.insertId, username, role: 'owner', name },
+      JWT_SECRET,
+      { expiresIn: '12h' }
+    );
+
+    res.json({
+      message: 'Registrasi berhasil! Selamat datang di KasirPro.',
+      token,
+      user: { id: result.insertId, username, name, role: 'owner' }
+    });
+  } catch (err) {
+    console.error('Register owner error:', err);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'Username sudah dipakai.' });
+    }
+    res.status(500).json({ error: 'Gagal registrasi: ' + err.message });
+  }
+});
+
 // ============ DEBUG: Check DB schema ============
 app.get('/api/debug/schema', authenticateToken, async (req, res) => {
   try {

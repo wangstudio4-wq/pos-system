@@ -548,6 +548,7 @@ tbody tr:hover { background: #f8fafc; }
 .justify-between { justify-content: space-between; }
 .hidden { display: none !important; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .w-full { width: 100%; }
 .overflow-x { overflow-x: auto; }
 .clickable-row { cursor: pointer; }
@@ -600,8 +601,57 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
 
+<!-- Loading / Setup Page -->
+<div id="setupPage" style="display:none">
+  <div class="login-card" style="max-width:440px">
+    <div style="text-align:center;margin-bottom:8px">
+      <div style="width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 25px rgba(79,70,229,.3)">🏪</div>
+    </div>
+    <h1>KasirPro</h1>
+    <p class="subtitle" id="setupStatus">Menyiapkan sistem...</p>
+    <div id="setupSpinner" style="text-align:center;padding:20px">
+      <div style="display:inline-block;width:40px;height:40px;border:4px solid #e2e8f0;border-top-color:#4f46e5;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Register Owner Page -->
+<div id="registerPage" style="display:none">
+  <div class="login-card" style="max-width:440px">
+    <div style="text-align:center;margin-bottom:8px">
+      <div style="width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 25px rgba(79,70,229,.3)">🏪</div>
+    </div>
+    <h1>KasirPro</h1>
+    <p class="subtitle">Selamat datang! Buat akun pemilik usaha</p>
+    <form id="registerForm">
+      <div class="form-group">
+        <label>👤 Nama Lengkap</label>
+        <input type="text" id="regName" placeholder="Contoh: Budi Santoso" required>
+      </div>
+      <div class="form-group">
+        <label>🏪 Nama Toko (opsional)</label>
+        <input type="text" id="regStoreName" placeholder="Contoh: Toko Berkah Jaya">
+      </div>
+      <div class="form-group">
+        <label>📧 Username</label>
+        <input type="text" id="regUsername" placeholder="Untuk login nanti" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>🔑 Password</label>
+        <input type="password" id="regPassword" placeholder="Minimal 4 karakter" required minlength="4" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>🔑 Konfirmasi Password</label>
+        <input type="password" id="regPassword2" placeholder="Ketik ulang password" required minlength="4" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg btn-block" id="registerBtn" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 15px rgba(16,185,129,.3)">🚀 Mulai Sekarang</button>
+    </form>
+    <p style="text-align:center;margin-top:20px;font-size:12px;color:#94a3b8">© 2025 KasirPro — All rights reserved</p>
+  </div>
+</div>
+
 <!-- Login Page -->
-<div id="loginPage">
+<div id="loginPage" style="display:none">
   <div class="login-card">
     <div style="text-align:center;margin-bottom:8px">
       <div style="width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 25px rgba(79,70,229,.3)">🏪</div>
@@ -756,27 +806,73 @@ function payMethodBadge(m) {
   return '<span class="badge ' + cls + '">' + escHtml(m || 'Cash') + '</span>';
 }
 
-// ============ AUTH ============
+// ============ AUTH & SETUP ============
+function hideAllPages() {
+  ['setupPage','registerPage','loginPage','appContainer'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+}
+
 async function checkAuth() {
-  if (!token) { showLogin(); return; }
+  hideAllPages();
+  document.getElementById('setupPage').style.display = 'flex';
+
   try {
-    const data = await apiFetch('/api/auth/me');
-    currentUser = data.user;
-    showApp();
-  } catch {
-    token = null;
-    localStorage.removeItem('pos_token');
-    showLogin();
+    // Step 1: Check setup status
+    const status = await apiFetch('/api/setup/status');
+
+    if (!status.tablesReady) {
+      // Auto-init database
+      document.getElementById('setupStatus').textContent = 'Membuat database...';
+      await apiFetch('/api/setup/init', { method: 'POST' });
+      // Re-check
+      const s2 = await apiFetch('/api/setup/status');
+      if (!s2.hasUsers) { showRegister(); return; }
+    }
+
+    if (!status.hasUsers) {
+      showRegister();
+      return;
+    }
+
+    // Step 2: Check if already logged in
+    if (!token) { showLogin(); return; }
+    try {
+      const data = await apiFetch('/api/auth/me');
+      currentUser = data.user;
+      showApp();
+    } catch {
+      token = null;
+      localStorage.removeItem('pos_token');
+      showLogin();
+    }
+  } catch (err) {
+    // If setup check fails, try normal login flow
+    if (!token) { showLogin(); return; }
+    try {
+      const data = await apiFetch('/api/auth/me');
+      currentUser = data.user;
+      showApp();
+    } catch {
+      token = null;
+      localStorage.removeItem('pos_token');
+      showLogin();
+    }
   }
 }
 
+function showRegister() {
+  hideAllPages();
+  document.getElementById('registerPage').style.display = 'flex';
+}
+
 function showLogin() {
+  hideAllPages();
   document.getElementById('loginPage').style.display = 'flex';
-  document.getElementById('appContainer').style.display = 'none';
 }
 
 function showApp() {
-  document.getElementById('loginPage').style.display = 'none';
+  hideAllPages();
   document.getElementById('appContainer').style.display = 'block';
   renderSidebar();
   navigateTo(currentUser.role === 'kasir' ? 'pos' : 'dashboard');
@@ -789,6 +885,38 @@ function logout() {
   showLogin();
 }
 
+// Register owner form
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('registerBtn');
+  const pw = document.getElementById('regPassword').value;
+  const pw2 = document.getElementById('regPassword2').value;
+
+  if (pw !== pw2) { showToast('Password tidak cocok!', 'error'); return; }
+
+  btn.disabled = true; btn.textContent = 'Mendaftar...';
+  try {
+    const data = await apiFetch('/api/auth/register-owner', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: document.getElementById('regName').value,
+        username: document.getElementById('regUsername').value,
+        password: pw,
+        store_name: document.getElementById('regStoreName').value
+      })
+    });
+    token = data.token;
+    currentUser = data.user;
+    localStorage.setItem('pos_token', token);
+    showToast('🎉 Selamat datang di KasirPro, ' + currentUser.name + '!');
+    showApp();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+  btn.disabled = false; btn.textContent = '🚀 Mulai Sekarang';
+});
+
+// Login form
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('loginBtn');
@@ -809,7 +937,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   } catch (err) {
     showToast(err.message, 'error');
   }
-  btn.disabled = false; btn.textContent = 'Masuk';
+  btn.disabled = false; btn.textContent = '🔐 Masuk';
 });
 
 // ============ NAVIGATION ============
