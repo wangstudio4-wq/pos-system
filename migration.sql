@@ -1,11 +1,103 @@
 -- ============================================================
--- POS MAJOO-LIKE: DATABASE MIGRATION
--- Compatible with MySQL 8.0+
--- Run this SQL after the initial tables (users, products, 
--- transactions, transaction_items) are already created.
+-- FIX MIGRATION: Add missing columns
+-- Run this if dashboard shows error
 -- ============================================================
 
--- 1. CATEGORIES
+-- Add user_name to transactions if not exists
+DROP PROCEDURE IF EXISTS add_col_if_not_exists;
+DELIMITER $$
+CREATE PROCEDURE add_col_if_not_exists()
+BEGIN
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'user_name'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'created_at'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'payment_method'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'customer_name'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'customer_id'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'discount'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN discount DECIMAL(15,2) DEFAULT 0;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'subtotal'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN subtotal DECIMAL(15,2) DEFAULT 0;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'notes'
+  ) THEN
+    ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'category_id'
+  ) THEN
+    ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'min_stock'
+  ) THEN
+    ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'image_url'
+  ) THEN
+    ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transaction_items' AND COLUMN_NAME = 'discount'
+  ) THEN
+    ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0;
+  END IF;
+END$$
+DELIMITER ;
+
+CALL add_col_if_not_exists();
+DROP PROCEDURE IF EXISTS add_col_if_not_exists;
+
+-- Ensure tables exist
 CREATE TABLE IF NOT EXISTS categories (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -13,13 +105,6 @@ CREATE TABLE IF NOT EXISTS categories (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. ADD columns to PRODUCTS (drop constraint first if re-running)
-ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL;
-ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL;
-ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5;
-ALTER TABLE products ADD CONSTRAINT fk_product_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL;
-
--- 3. CUSTOMERS
 CREATE TABLE IF NOT EXISTS customers (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -33,19 +118,6 @@ CREATE TABLE IF NOT EXISTS customers (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- 4. UPDATE TRANSACTIONS for payment method, customer, discount
-ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash';
-ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL;
-ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL;
-ALTER TABLE transactions ADD COLUMN discount DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE transactions ADD COLUMN subtotal DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL;
-ALTER TABLE transactions ADD CONSTRAINT fk_tx_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
-
--- 5. UPDATE TRANSACTION_ITEMS for discount
-ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0;
-
--- 6. SHIFTS
 CREATE TABLE IF NOT EXISTS shifts (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
@@ -58,11 +130,9 @@ CREATE TABLE IF NOT EXISTS shifts (
   notes TEXT DEFAULT NULL,
   status ENUM('open', 'closed') DEFAULT 'open',
   opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  closed_at TIMESTAMP DEFAULT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  closed_at TIMESTAMP DEFAULT NULL
 );
 
--- 7. EXPENSES
 CREATE TABLE IF NOT EXISTS expenses (
   id INT AUTO_INCREMENT PRIMARY KEY,
   category VARCHAR(50) NOT NULL,
@@ -71,11 +141,10 @@ CREATE TABLE IF NOT EXISTS expenses (
   user_id INT NOT NULL,
   user_name VARCHAR(100) NOT NULL,
   date DATE DEFAULT (CURRENT_DATE),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 8. Insert default categories
+-- Insert default categories if empty
 INSERT IGNORE INTO categories (id, name, color) VALUES
   (1, 'Makanan', '#ef4444'),
   (2, 'Minuman', '#3b82f6'),

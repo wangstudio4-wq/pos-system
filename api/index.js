@@ -24,72 +24,145 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/shifts', shiftRoutes);
 
+// ============ DEBUG: Check DB schema ============
+app.get('/api/debug/schema', authenticateToken, async (req, res) => {
+  try {
+    const tables = ['users', 'products', 'transactions', 'transaction_items', 'categories', 'customers', 'shifts', 'expenses'];
+    const schema = {};
+    for (const table of tables) {
+      try {
+        const [cols] = await pool.query(`SHOW COLUMNS FROM ${table}`);
+        schema[table] = cols.map(c => c.Field);
+      } catch (e) {
+        schema[table] = 'TABLE NOT FOUND';
+      }
+    }
+    res.json(schema);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============ AUTO MIGRATION ============
+app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  const results = [];
+  const safeExec = async (label, sql) => {
+    try { await pool.query(sql); results.push(`✅ ${label}`); }
+    catch (e) { results.push(`⚠️ ${label}: ${e.message}`); }
+  };
+
+  await safeExec('Create categories', `CREATE TABLE IF NOT EXISTS categories (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    color VARCHAR(7) DEFAULT '#2563eb', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create customers', `CREATE TABLE IF NOT EXISTS customers (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) DEFAULT NULL, email VARCHAR(100) DEFAULT NULL,
+    address TEXT DEFAULT NULL, points INT DEFAULT 0,
+    total_transactions INT DEFAULT 0, total_spent DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Create shifts', `CREATE TABLE IF NOT EXISTS shifts (
+    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+    user_name VARCHAR(100) NOT NULL, opening_cash DECIMAL(15,2) DEFAULT 0,
+    closing_cash DECIMAL(15,2) DEFAULT NULL, expected_cash DECIMAL(15,2) DEFAULT NULL,
+    total_sales DECIMAL(15,2) DEFAULT 0, total_transactions INT DEFAULT 0,
+    notes TEXT DEFAULT NULL, status ENUM('open','closed') DEFAULT 'open',
+    opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, closed_at TIMESTAMP DEFAULT NULL)`);
+  await safeExec('Create expenses', `CREATE TABLE IF NOT EXISTS expenses (
+    id INT AUTO_INCREMENT PRIMARY KEY, category VARCHAR(50) NOT NULL,
+    description TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) NOT NULL,
+    date DATE DEFAULT (CURRENT_DATE), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
+  await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
+  await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
+  await safeExec('transactions.payment_method', `ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash'`);
+  await safeExec('transactions.customer_id', `ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL`);
+  await safeExec('transactions.customer_name', `ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.discount', `ALTER TABLE transactions ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.subtotal', `ALTER TABLE transactions ADD COLUMN subtotal DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.notes', `ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL`);
+  await safeExec('transactions.user_name', `ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.created_at', `ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+  await safeExec('transaction_items.discount', `ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
+    (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
+  res.json({ results });
+});
+
 // ============ DASHBOARD ============
 app.get('/api/dashboard', authenticateToken, async (req, res) => {
+  const safeQuery = async (sql, params) => {
+    try { const [rows] = await pool.query(sql, params); return rows; }
+    catch (e) { console.error('Dashboard query error:', e.message); return null; }
+  };
+
   try {
-    const role = req.user.role;
+    // Detect date column in transactions
+    let dateCol = 'created_at';
+    try {
+      const [cols] = await pool.query('SHOW COLUMNS FROM transactions');
+      const colNames = cols.map(c => c.Field);
+      if (!colNames.includes('created_at')) {
+        dateCol = colNames.includes('date') ? 'date' : colNames.includes('transaction_date') ? 'transaction_date' : 'id';
+      }
+    } catch (e) {}
+
+    const dateFilter = dateCol === 'id' ? '1=1' : `DATE(${dateCol}) = CURDATE()`;
+    const dateRange = dateCol === 'id' ? '1=1' : `${dateCol} >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
+    const orderBy = dateCol === 'id' ? 'id DESC' : `${dateCol} DESC`;
 
     // Today's stats
-    const [todaySales] = await pool.query(
-      `SELECT COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue 
-       FROM transactions WHERE DATE(created_at) = CURDATE()`
+    const todaySales = await safeQuery(
+      `SELECT COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue FROM transactions WHERE ${dateFilter}`
     );
 
-    // Products with low stock
-    const [lowStock] = await pool.query(
-      `SELECT COUNT(*) as count FROM products WHERE stock <= min_stock AND stock > 0`
+    // Stock queries - try with min_stock first, fallback without
+    let lowStock = await safeQuery(`SELECT COUNT(*) as count FROM products WHERE stock <= min_stock AND stock > 0`);
+    if (!lowStock) lowStock = await safeQuery(`SELECT COUNT(*) as count FROM products WHERE stock <= 5 AND stock > 0`);
+    if (!lowStock) lowStock = [{ count: 0 }];
+
+    const outOfStock = await safeQuery(`SELECT COUNT(*) as count FROM products WHERE stock = 0`) || [{ count: 0 }];
+    const totalProducts = await safeQuery('SELECT COUNT(*) as count FROM products') || [{ count: 0 }];
+    const totalCustomers = await safeQuery('SELECT COUNT(*) as count FROM customers') || [{ count: 0 }];
+    const todayExpenses = await safeQuery(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date = CURDATE()`) || [{ total: 0 }];
+
+    // Sales chart
+    let salesChart = [];
+    if (dateCol !== 'id') {
+      salesChart = await safeQuery(
+        `SELECT DATE(${dateCol}) as date, COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue
+         FROM transactions WHERE ${dateRange} GROUP BY DATE(${dateCol}) ORDER BY date ASC`
+      ) || [];
+    }
+
+    // Recent transactions - try full query, fallback to basic
+    let recentTx = await safeQuery(
+      `SELECT id, total, payment_method, user_name, customer_name, ${dateCol} as created_at FROM transactions ORDER BY ${orderBy} LIMIT 5`
     );
-
-    const [outOfStock] = await pool.query(
-      `SELECT COUNT(*) as count FROM products WHERE stock = 0`
-    );
-
-    // Total products
-    const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products');
-
-    // Total customers
-    const [totalCustomers] = await pool.query('SELECT COUNT(*) as count FROM customers');
-
-    // Today's expenses
-    const [todayExpenses] = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date = CURDATE()`
-    );
-
-    // Sales chart (last 7 days)
-    const [salesChart] = await pool.query(
-      `SELECT DATE(created_at) as date, COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue
-       FROM transactions 
-       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-       GROUP BY DATE(created_at) ORDER BY date ASC`
-    );
-
-    // Recent transactions (last 5)
-    const [recentTx] = await pool.query(
-      `SELECT id, total, payment_method, user_name, customer_name, created_at 
-       FROM transactions ORDER BY created_at DESC LIMIT 5`
-    );
+    if (!recentTx) {
+      recentTx = await safeQuery(`SELECT id, total, ${dateCol} as created_at FROM transactions ORDER BY ${orderBy} LIMIT 5`) || [];
+    }
 
     // Top products today
-    const [topToday] = await pool.query(
+    let topToday = await safeQuery(
       `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_sales
-       FROM transaction_items ti
-       JOIN transactions t ON ti.transaction_id = t.id
-       WHERE DATE(t.created_at) = CURDATE()
+       FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id
+       WHERE ${dateFilter.replace(dateCol, 't.' + dateCol)}
        GROUP BY ti.product_name ORDER BY total_sales DESC LIMIT 5`
-    );
+    ) || [];
 
-    // Current shift for this user
-    const [currentShift] = await pool.query(
-      'SELECT * FROM shifts WHERE user_id = ? AND status = "open" LIMIT 1',
-      [req.user.id]
+    // Current shift
+    const currentShift = await safeQuery(
+      'SELECT * FROM shifts WHERE user_id = ? AND status = "open" LIMIT 1', [req.user.id]
     );
 
     res.json({
       today: {
-        transactions: todaySales[0].transactions,
-        revenue: todaySales[0].revenue,
-        expenses: todayExpenses[0].total,
-        profit: todaySales[0].revenue - todayExpenses[0].total
+        transactions: todaySales ? todaySales[0].transactions : 0,
+        revenue: todaySales ? todaySales[0].revenue : 0,
+        expenses: todayExpenses[0].total || 0,
+        profit: (todaySales ? todaySales[0].revenue : 0) - (todayExpenses[0].total || 0)
       },
       stock: {
         total: totalProducts[0].count,
@@ -100,11 +173,11 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
       sales_chart: salesChart,
       recent_transactions: recentTx,
       top_products_today: topToday,
-      current_shift: currentShift.length > 0 ? currentShift[0] : null
+      current_shift: currentShift && currentShift.length > 0 ? currentShift[0] : null
     });
   } catch (err) {
     console.error('Dashboard error:', err);
-    res.status(500).json({ error: 'Gagal memuat dashboard.' });
+    res.status(500).json({ error: 'Gagal memuat dashboard: ' + err.message });
   }
 });
 
