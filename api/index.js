@@ -75,6 +75,7 @@ app.post('/api/setup/init', async (req, res) => {
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         price DECIMAL(15,2) NOT NULL,
+        cost_price DECIMAL(15,2) DEFAULT 0,
         stock INT DEFAULT 0,
         category_id INT DEFAULT NULL,
         image_url VARCHAR(500) DEFAULT NULL,
@@ -115,6 +116,7 @@ app.post('/api/setup/init', async (req, res) => {
         product_id INT NOT NULL,
         product_name VARCHAR(100) NOT NULL,
         price DECIMAL(15,2) NOT NULL,
+        cost_price DECIMAL(15,2) DEFAULT 0,
         quantity INT NOT NULL,
         subtotal DECIMAL(15,2) NOT NULL,
         discount DECIMAL(15,2) DEFAULT 0
@@ -275,6 +277,8 @@ async function runAutoMigrate() {
   await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
   await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
+  await safeExec('products.cost_price', `ALTER TABLE products ADD COLUMN cost_price DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transaction_items.cost_price', `ALTER TABLE transaction_items ADD COLUMN cost_price DECIMAL(15,2) DEFAULT 0`);
   await safeExec('transactions.payment_method', `ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash'`);
   await safeExec('transactions.customer_id', `ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL`);
   await safeExec('transactions.customer_name', `ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL`);
@@ -339,6 +343,8 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
   await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
+  await safeExec('products.cost_price', `ALTER TABLE products ADD COLUMN cost_price DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transaction_items.cost_price', `ALTER TABLE transaction_items ADD COLUMN cost_price DECIMAL(15,2) DEFAULT 0`);
   await safeExec('transactions.payment_method', `ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(20) DEFAULT 'cash'`);
   await safeExec('transactions.customer_id', `ALTER TABLE transactions ADD COLUMN customer_id INT DEFAULT NULL`);
   await safeExec('transactions.customer_name', `ALTER TABLE transactions ADD COLUMN customer_name VARCHAR(100) DEFAULT NULL`);
@@ -469,20 +475,20 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 // POST new product
 app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, stock, category_id, min_stock } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({ error: 'Nama dan harga produk wajib diisi.' });
     }
 
     const [result] = await pool.query(
-      'INSERT INTO products (barcode, name, price, stock, category_id, min_stock) VALUES (?, ?, ?, ?, ?, ?)',
-      [barcode || null, name, price, stock || 0, category_id || null, min_stock || 5]
+      'INSERT INTO products (barcode, name, price, cost_price, stock, category_id, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [barcode || null, name, price, cost_price || 0, stock || 0, category_id || null, min_stock || 5]
     );
 
     res.status(201).json({
       message: 'Produk berhasil ditambahkan!',
-      product: { id: result.insertId, barcode, name, price, stock: stock || 0 }
+      product: { id: result.insertId, barcode, name, price, cost_price: cost_price || 0, stock: stock || 0 }
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -496,10 +502,10 @@ app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), as
 // PUT update product
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, stock, category_id, min_stock } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock } = req.body;
     await pool.query(
-      'UPDATE products SET barcode = ?, name = ?, price = ?, stock = ?, category_id = ?, min_stock = ? WHERE id = ?',
-      [barcode || null, name, price, stock, category_id || null, min_stock || 5, req.params.id]
+      'UPDATE products SET barcode = ?, name = ?, price = ?, cost_price = ?, stock = ?, category_id = ?, min_stock = ? WHERE id = ?',
+      [barcode || null, name, price, cost_price || 0, stock, category_id || null, min_stock || 5, req.params.id]
     );
     res.json({ message: 'Produk berhasil diupdate!' });
   } catch (err) {
@@ -589,8 +595,8 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
 
     for (const item of items) {
       await conn.query(
-        'INSERT INTO transaction_items (transaction_id, product_id, product_name, price, qty, subtotal, discount) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [txId, item.id, item.name, item.price, item.qty, item.price * item.qty, item.discount || 0]
+        'INSERT INTO transaction_items (transaction_id, product_id, product_name, price, cost_price, qty, subtotal, discount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [txId, item.id, item.name, item.price, item.cost_price || 0, item.qty, item.price * item.qty, item.discount || 0]
       );
 
       await conn.query(

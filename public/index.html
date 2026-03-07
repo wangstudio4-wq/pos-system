@@ -1283,7 +1283,7 @@ function addToCart(productId) {
     }
     existing.qty++;
   } else {
-    cart.push({ id: p.id, name: p.name, price: Number(p.price), qty: 1, discount: 0 });
+    cart.push({ id: p.id, name: p.name, price: Number(p.price), cost_price: Number(p.cost_price || 0), qty: 1, discount: 0 });
   }
   updateCartUI();
 }
@@ -1444,7 +1444,7 @@ async function processPayment() {
   const notes = notesEl ? notesEl.value : '';
 
   const payload = {
-    items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty, discount: c.discount })),
+    items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, cost_price: c.cost_price || 0, qty: c.qty, discount: c.discount })),
     subtotal: subtotal,
     discount: totalDiscount,
     total: grandTotal,
@@ -1569,18 +1569,22 @@ async function renderProducts() {
     let html = '<div class="page-header"><h1>📦 Kelola Produk</h1><p>Manajemen produk dan stok</p></div>';
     html += '<div class="toolbar"><input class="search-input" placeholder="🔍 Cari produk..." oninput="filterProductTable(this.value)"><div class="spacer"></div><button class="btn btn-primary" onclick="showProductModal()">+ Tambah Produk</button></div>';
 
-    html += '<div class="card"><div class="overflow-x"><table id="productTable"><thead><tr><th>Barcode</th><th>Nama</th><th>Kategori</th><th>Harga</th><th>Stok</th><th>Min</th><th>Aksi</th></tr></thead><tbody>';
+    html += '<div class="card"><div class="overflow-x"><table id="productTable"><thead><tr><th>Barcode</th><th>Nama</th><th>Kategori</th><th>Harga Jual</th><th>Modal</th><th>Profit</th><th>Stok</th><th>Min</th><th>Aksi</th></tr></thead><tbody>';
     if (products.length === 0) {
-      html += '<tr><td colspan="7">' + emptyHtml('📦', 'Belum ada produk') + '</td></tr>';
+      html += '<tr><td colspan="9">' + emptyHtml('📦', 'Belum ada produk') + '</td></tr>';
     } else {
       products.forEach(p => {
         const catColor = p.category_color || '#6b7280';
         const low = (p.min_stock && p.stock <= p.min_stock);
+        const profit = (p.price || 0) - (p.cost_price || 0);
+        const profitColor = profit > 0 ? '#415D43' : profit < 0 ? '#dc2626' : '#6b7280';
         html += '<tr data-search="' + escHtml((p.name||'').toLowerCase() + ' ' + (p.barcode||'').toLowerCase()) + '">' +
           '<td><code>' + escHtml(p.barcode || '-') + '</code></td>' +
           '<td><strong>' + escHtml(p.name) + '</strong></td>' +
           '<td>' + (p.category_name ? '<span class="category-badge" style="background:' + escHtml(catColor) + '">' + escHtml(p.category_name) + '</span>' : '-') + '</td>' +
           '<td>' + formatRp(p.price) + '</td>' +
+          '<td>' + (p.cost_price ? formatRp(p.cost_price) : '<span style="color:#999">-</span>') + '</td>' +
+          '<td><strong style="color:' + profitColor + '">' + (p.cost_price ? formatRp(profit) : '-') + '</strong></td>' +
           '<td>' + (low ? '<span class="low-stock-tag">' + p.stock + '</span>' : p.stock) + '</td>' +
           '<td>' + (p.min_stock||0) + '</td>' +
           '<td><button class="btn btn-sm btn-primary" onclick=\'showProductModal(' + JSON.stringify(p).replace(/'/g, "\\'") + ')\'>✏️</button> ' +
@@ -1613,7 +1617,8 @@ function showProductModal(product) {
   html += '<div class="modal-body"><form id="productForm">';
   html += '<div class="form-group"><label>Barcode</label><input id="pBarcode" value="' + escHtml(product?.barcode || '') + '" placeholder="Barcode (opsional)"></div>';
   html += '<div class="form-group"><label>Nama Produk *</label><input id="pName" value="' + escHtml(product?.name || '') + '" required></div>';
-  html += '<div class="form-group"><label>Harga *</label><input id="pPrice" type="number" min="0" value="' + (product?.price || '') + '" required></div>';
+  html += '<div class="form-group"><label>Harga Jual *</label><input id="pPrice" type="number" min="0" value="' + (product?.price || '') + '" required></div>';
+  html += '<div class="form-group"><label>Harga Modal</label><input id="pCostPrice" type="number" min="0" value="' + (product?.cost_price || 0) + '" placeholder="Harga beli/modal"></div>';
   html += '<div class="form-group"><label>Stok *</label><input id="pStock" type="number" min="0" value="' + (product?.stock ?? '') + '" required></div>';
   html += '<div class="form-group"><label>Stok Minimum</label><input id="pMinStock" type="number" min="0" value="' + (product?.min_stock || 0) + '"></div>';
   html += '<div class="form-group"><label>Kategori</label><select id="pCategory"><option value="">-- Pilih Kategori --</option>';
@@ -1631,6 +1636,7 @@ async function saveProduct(id) {
     barcode: document.getElementById('pBarcode').value || null,
     name: document.getElementById('pName').value,
     price: Number(document.getElementById('pPrice').value),
+    cost_price: Number(document.getElementById('pCostPrice').value) || 0,
     stock: Number(document.getElementById('pStock').value),
     min_stock: Number(document.getElementById('pMinStock').value) || 0,
     category_id: document.getElementById('pCategory').value ? Number(document.getElementById('pCategory').value) : null
