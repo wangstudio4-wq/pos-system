@@ -419,10 +419,10 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 
     // Top products today
     let topToday = await safeQuery(
-      `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_sales
+      `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_revenue
        FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id
        WHERE ${dateFilter.replace(dateCol, 't.' + dateCol)}
-       GROUP BY ti.product_name ORDER BY total_sales DESC LIMIT 5`
+       GROUP BY ti.product_name ORDER BY total_revenue DESC LIMIT 5`
     ) || [];
 
     // Current shift
@@ -808,11 +808,11 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
     );
 
     const [topProducts] = await pool.query(
-      `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_sales
+      `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_revenue
        FROM transaction_items ti
        JOIN transactions t ON ti.transaction_id = t.id
        ${dateFilter.replace('created_at', 't.created_at')}
-       GROUP BY ti.product_name ORDER BY total_sales DESC LIMIT 10`
+       GROUP BY ti.product_name ORDER BY total_revenue DESC LIMIT 10`
     );
 
     // Payment method breakdown
@@ -884,7 +884,7 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
     const [byProduct] = await pool.query(
       `SELECT ti.product_name, 
               SUM(ti.qty) as total_qty,
-              SUM(ti.subtotal) as total_sales,
+              SUM(ti.subtotal) as total_revenue,
               SUM(ti.cost_price * ti.qty) as total_cost,
               SUM(ti.subtotal) - SUM(ti.cost_price * ti.qty) as profit
        FROM transaction_items ti
