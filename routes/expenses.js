@@ -18,8 +18,9 @@ router.get('/', authenticateToken, authorizeRole('admin', 'owner'), async (req, 
       query += ' WHERE date BETWEEN ? AND ?';
       params.push(start_date, end_date);
     } else if (month) {
-      query += ' WHERE DATE_FORMAT(date, "%Y-%m") = ?';
-      params.push(month);
+      // Use date range instead of DATE_FORMAT for better compatibility
+      query += ' WHERE date >= ? AND date < DATE_ADD(?, INTERVAL 1 MONTH)';
+      params.push(month + '-01', month + '-01');
     }
 
     query += ' ORDER BY date DESC, created_at DESC';

@@ -1939,7 +1939,7 @@ async function renderExpenses() {
     const today = new Date().toISOString().split('T')[0];
     const getSummaryTotal = (d) => d?.summary?.total_expenses || d?.summary?.total || d?.total_expenses || d?.total || 0;
     const [expData, monthSum, todaySum, weekSum] = await Promise.all([
-      apiFetch('/api/expenses?month=' + today.substring(0,7)).catch(() => []),
+      apiFetch('/api/expenses?month=' + today.substring(0,7)),
       apiFetch('/api/expenses/summary?period=month').catch(() => ({ total: 0 })),
       apiFetch('/api/expenses/summary?period=today').catch(() => ({ total: 0 })),
       apiFetch('/api/expenses/summary?period=week').catch(() => ({ total: 0 }))
