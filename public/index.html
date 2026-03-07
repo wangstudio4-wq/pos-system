@@ -388,6 +388,41 @@ tbody tr:hover { background: #f9fafb; }
 .clickable-row { cursor: pointer; }
 .clickable-row:hover { background: var(--primary-light) !important; }
 .low-stock-tag { background: var(--error-bg); color: var(--error); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+
+/* Print Overlay */
+#printOverlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #fff; z-index: 100000; overflow-y: auto;
+}
+.print-toolbar {
+  position: sticky; top: 0; background: #4f46e5; padding: 12px;
+  display: flex; gap: 10px; justify-content: center; z-index: 100001;
+}
+.print-btn-back {
+  padding: 10px 24px; border: none; border-radius: 8px;
+  font-size: 15px; font-weight: bold; cursor: pointer;
+  background: #fff; color: #4f46e5;
+}
+.print-btn-cetak {
+  padding: 10px 24px; border: none; border-radius: 8px;
+  font-size: 15px; font-weight: bold; cursor: pointer;
+  background: #22c55e; color: #fff;
+}
+.print-receipt-body {
+  font-family: "Courier New", monospace; font-size: 12pt;
+  width: 72mm; margin: 20px auto; padding: 4mm;
+}
+
+/* Saat printing-mode aktif, sembunyikan semua kecuali overlay */
+body.printing-mode > *:not(#printOverlay) { display: none !important; }
+
+/* Saat print, sembunyikan toolbar */
+@media print {
+  .print-toolbar { display: none !important; }
+  #printOverlay { position: static; }
+  .print-receipt-body { margin: 0 auto; }
+  @page { size: 80mm auto; margin: 0; }
+}
 </style>
 </head>
 <body>
@@ -1111,27 +1146,32 @@ function showReceipt(payload, result) {
 
 function printReceipt() {
   const content = document.getElementById('receiptContent');
-  if (!content) { window.print(); return; }
-  const printWin = window.open('', '_blank', 'width=400,height=600');
-  printWin.document.write('<html><head><title>Struk</title><style>');
-  printWin.document.write('@page { size: 80mm auto; margin: 0; }');
-  printWin.document.write('body { font-family: "Courier New", monospace; font-size: 12pt; width: 72mm; margin: 0 auto; padding: 4mm; }');
-  printWin.document.write('.receipt-header { text-align: center; margin-bottom: 8px; }');
-  printWin.document.write('.receipt-header h3 { font-size: 16pt; margin: 0; font-weight: bold; }');
-  printWin.document.write('.receipt-header p { margin: 2px 0; }');
-  printWin.document.write('.receipt-divider { border-top: 1px dashed #000; margin: 6px 0; }');
-  printWin.document.write('.receipt-row { display: flex; justify-content: space-between; font-size: 11pt; margin: 2px 0; }');
-  printWin.document.write('.receipt-item { margin-bottom: 4px; }');
-  printWin.document.write('.receipt-item .item-name { font-size: 11pt; font-weight: bold; }');
-  printWin.document.write('.receipt-item .item-detail { font-size: 10pt; color: #333; display: flex; justify-content: space-between; }');
-  printWin.document.write('.receipt-total { font-weight: 700; font-size: 13pt; }');
-  printWin.document.write('.receipt-footer { text-align: center; margin-top: 10px; font-size: 9pt; color: #333; }');
-  printWin.document.write('</style></head><body>');
-  printWin.document.write(content.innerHTML);
-  printWin.document.write('</body></html>');
-  printWin.document.close();
-  printWin.focus();
-  setTimeout(function() { printWin.print(); printWin.close(); }, 300);
+  if (!content) return;
+  
+  // Remove existing overlay if any
+  closePrintOverlay();
+  
+  // Create fullscreen overlay (no new tab/iframe - works on Android)
+  const overlay = document.createElement('div');
+  overlay.id = 'printOverlay';
+  overlay.innerHTML = 
+    '<div class="print-toolbar">' +
+      '<button class="print-btn-back" onclick="closePrintOverlay()">← Kembali</button>' +
+      '<button class="print-btn-cetak" onclick="doPrint()">🖨️ Cetak</button>' +
+    '</div>' +
+    '<div class="print-receipt-body">' + content.innerHTML + '</div>';
+  document.body.appendChild(overlay);
+  document.body.classList.add('printing-mode');
+}
+
+function doPrint() {
+  window.print();
+}
+
+function closePrintOverlay() {
+  const overlay = document.getElementById('printOverlay');
+  if (overlay) overlay.remove();
+  document.body.classList.remove('printing-mode');
 }
 
 // ============ PRODUCTS ============
