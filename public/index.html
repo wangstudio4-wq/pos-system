@@ -59,12 +59,12 @@ tbody tr:hover { background: #f8fafc; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 /* ====== LOGIN PAGE ====== */
-#loginPage {
+#loginPage, #registerPage, #setupPage {
   display: flex; align-items: center; justify-content: center;
   min-height: 100vh; position: relative; overflow: hidden;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 30%, #312e81 60%, #4f46e5 100%);
 }
-#loginPage::before {
+#loginPage::before, #registerPage::before, #setupPage::before {
   content: ''; position: absolute; top: -50%; left: -50%;
   width: 200%; height: 200%;
   background: radial-gradient(circle at 30% 50%, rgba(99,102,241,.15) 0%, transparent 50%),
