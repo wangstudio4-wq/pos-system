@@ -603,7 +603,7 @@ function showApp() {
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appContainer').style.display = 'block';
   renderSidebar();
-  navigateTo('dashboard');
+  navigateTo(currentUser.role === 'kasir' ? 'pos' : 'dashboard');
 }
 
 function logout() {
@@ -638,13 +638,14 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 // ============ NAVIGATION ============
 const NAV_ITEMS = [
-  { id: 'dashboard', icon: '📊', label: 'Dashboard', roles: ['owner','admin','kasir'] },
+  { id: 'dashboard', icon: '📊', label: 'Dashboard', roles: ['owner','admin'] },
   { id: 'pos', icon: '🛒', label: 'Kasir', roles: ['owner','admin','kasir'] },
+  { id: 'history', icon: '🧾', label: 'Histori Transaksi', roles: ['kasir'] },
   { id: 'products', icon: '📦', label: 'Kelola Produk', roles: ['owner','admin'] },
   { id: 'categories', icon: '🏷️', label: 'Kategori', roles: ['owner','admin'] },
   { id: 'customers', icon: '👥', label: 'Pelanggan', roles: ['owner','admin'] },
   { id: 'expenses', icon: '💸', label: 'Pengeluaran', roles: ['owner','admin'] },
-  { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin','kasir'] },
+  { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin','kasir'] },
@@ -678,6 +679,7 @@ function navigateTo(page) {
   const renderers = {
     dashboard: renderDashboard,
     pos: renderPOS,
+    history: renderHistory,
     products: renderProducts,
     categories: renderCategories,
     customers: renderCustomers,
@@ -693,6 +695,45 @@ function navigateTo(page) {
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
   document.getElementById('sidebarOverlay').classList.toggle('show');
+}
+
+// ============ HISTORI TRANSAKSI (KASIR) ============
+async function renderHistory() {
+  const main = document.getElementById('mainContent');
+  try {
+    const data = await apiFetch('/api/my-transactions');
+    const txs = data.transactions || data || [];
+
+    let html = '<div class="page-header"><h1>🧾 Histori Transaksi</h1><p>Riwayat transaksi Anda</p></div>';
+
+    // Summary
+    let totalRevenue = 0;
+    txs.forEach(tx => { totalRevenue += Number(tx.total) || 0; });
+    html += '<div class="stat-grid">';
+    html += '<div class="stat-card stat-blue"><div class="stat-icon">🧾</div><div class="stat-value">' + txs.length + '</div><div class="stat-label">Total Transaksi</div></div>';
+    html += '<div class="stat-card stat-green"><div class="stat-icon">💰</div><div class="stat-value">' + formatRp(totalRevenue) + '</div><div class="stat-label">Total Penjualan</div></div>';
+    html += '</div>';
+
+    if (txs.length > 0) {
+      html += '<div class="card mt-4"><div class="card-header"><h3>📋 Daftar Transaksi</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Metode</th></tr></thead><tbody>';
+      txs.forEach(tx => {
+        html += '<tr class="clickable-row" onclick="showTransactionDetail(' + tx.id + ')">' +
+          '<td>#' + tx.id + '</td>' +
+          '<td>' + formatDateTime(tx.created_at || tx.date) + '</td>' +
+          '<td>' + escHtml(tx.customer_name || 'Umum') + '</td>' +
+          '<td><strong>' + formatRp(tx.total) + '</strong></td>' +
+          '<td>' + payMethodBadge(tx.payment_method) + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    } else {
+      html += '<div class="card mt-4">' + emptyHtml('🧾', 'Belum ada transaksi') + '</div>';
+    }
+
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat histori: ' + escHtml(err.message) + '</div>';
+  }
 }
 
 // ============ DASHBOARD ============

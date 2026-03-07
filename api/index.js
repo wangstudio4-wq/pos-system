@@ -329,6 +329,20 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
   }
 });
 
+// GET my transactions (for kasir - only their own)
+app.get('/api/my-transactions', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
+      [req.user.id]
+    );
+    res.json({ transactions: rows });
+  } catch (err) {
+    console.error('Get my transactions error:', err);
+    res.status(500).json({ error: 'Gagal mengambil data transaksi.' });
+  }
+});
+
 // GET transactions
 app.get('/api/transactions', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
