@@ -2046,15 +2046,25 @@ async function renderReports() {
     const txs = txData.transactions || txData || [];
     if (Array.isArray(txs) && txs.length > 0) {
       html += '<div class="card mt-4"><div class="card-header"><h3>🧾 Daftar Transaksi</h3></div>';
-      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Metode</th><th>Kasir</th></tr></thead><tbody>';
+      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Metode</th><th>Kasir</th><th>Status</th><th>Aksi</th></tr></thead><tbody>';
       txs.slice(0, 50).forEach(tx => {
+        const st = tx.status || 'completed';
+        const statusBadge = st === 'void' ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">VOID</span>'
+          : st === 'refund' ? '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">REFUND</span>'
+          : '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">✓</span>';
+        const actions = st === 'completed' ?
+          '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();voidTransaction(' + tx.id + ')" title="Void">🚫</button> ' +
+          '<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();refundTransaction(' + tx.id + ')" title="Refund" style="background:#f59e0b;color:#fff">↩️</button>'
+          : '<span style="font-size:11px;color:#94a3b8">' + escHtml(tx.void_reason || '-') + '</span>';
         html += '<tr class="clickable-row" onclick="showTransactionDetail(' + tx.id + ')">' +
           '<td>#' + tx.id + '</td>' +
           '<td>' + formatDateTime(tx.created_at || tx.date) + '</td>' +
           '<td>' + escHtml(tx.customer_name || 'Umum') + '</td>' +
           '<td><strong>' + formatRp(tx.total) + '</strong></td>' +
           '<td>' + payMethodBadge(tx.payment_method) + '</td>' +
-          '<td>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</td></tr>';
+          '<td>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + actions + '</td></tr>';
       });
       html += '</tbody></table></div></div>';
     }
@@ -2092,9 +2102,57 @@ async function showTransactionDetail(id) {
     html += '<div class="receipt-row"><span>Bayar (' + escHtml(tx.payment_method) + ')</span><span>' + formatRp(tx.payment) + '</span></div>';
     if (Number(tx.change) > 0) html += '<div class="receipt-row"><span>Kembalian</span><span>' + formatRp(tx.change) + '</span></div>';
     if (tx.notes) { html += '<div class="receipt-divider"></div><p style="font-size:12px">Catatan: ' + escHtml(tx.notes) + '</p>'; }
+    const st = tx.status || 'completed';
+    if (st === 'void' || st === 'refund') {
+      html += '<div class="receipt-divider"></div>';
+      html += '<div style="background:' + (st === 'void' ? '#fee2e2' : '#fef3c7') + ';padding:10px;border-radius:8px;margin-top:8px">';
+      html += '<p style="font-weight:700;color:' + (st === 'void' ? '#dc2626' : '#d97706') + ';margin:0 0 4px">' + (st === 'void' ? '🚫 VOID' : '↩️ REFUND') + '</p>';
+      html += '<p style="font-size:12px;margin:0">Alasan: ' + escHtml(tx.void_reason || '-') + '</p>';
+      html += '<p style="font-size:11px;margin:4px 0 0;color:#64748b">Oleh: ' + escHtml(tx.voided_by || '-') + ' — ' + (tx.voided_at ? formatDateTime(tx.voided_at) : '-') + '</p>';
+      html += '</div>';
+    }
     html += '</div></div>';
     html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>';
     openModal(html);
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ============ VOID & REFUND ============
+function voidTransaction(id) {
+  let html = '<div class="modal-header"><h3>🚫 Void Transaksi #' + id + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body"><p style="color:#dc2626;font-weight:600;margin-bottom:12px">⚠️ Void akan membatalkan transaksi dan mengembalikan stok.</p>';
+  html += '<div class="form-group"><label>Alasan Void *</label><textarea id="voidReason" rows="3" placeholder="Masukkan alasan void..." required style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit"></textarea></div></div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-danger" onclick="confirmVoid(' + id + ')">🚫 Void Transaksi</button></div>';
+  openModal(html);
+}
+
+async function confirmVoid(id) {
+  const reason = document.getElementById('voidReason').value.trim();
+  if (!reason) { showToast('Alasan void wajib diisi!', 'error'); return; }
+  try {
+    await apiFetch('/api/transactions/' + id + '/void', { method: 'POST', body: JSON.stringify({ reason }) });
+    showToast('Transaksi berhasil di-void!', 'success');
+    closeModal();
+    renderReports();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function refundTransaction(id) {
+  let html = '<div class="modal-header"><h3>↩️ Refund Transaksi #' + id + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body"><p style="color:#d97706;font-weight:600;margin-bottom:12px">⚠️ Refund akan mengembalikan uang & stok ke semula.</p>';
+  html += '<div class="form-group"><label>Alasan Refund *</label><textarea id="refundReason" rows="3" placeholder="Masukkan alasan refund..." required style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit"></textarea></div></div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="confirmRefund(' + id + ')" style="background:#f59e0b">↩️ Refund Transaksi</button></div>';
+  openModal(html);
+}
+
+async function confirmRefund(id) {
+  const reason = document.getElementById('refundReason').value.trim();
+  if (!reason) { showToast('Alasan refund wajib diisi!', 'error'); return; }
+  try {
+    await apiFetch('/api/transactions/' + id + '/refund', { method: 'POST', body: JSON.stringify({ reason }) });
+    showToast('Transaksi berhasil di-refund!', 'success');
+    closeModal();
+    renderReports();
   } catch (err) { showToast(err.message, 'error'); }
 }
 

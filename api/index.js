@@ -269,6 +269,10 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transactions.user_name', `ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL`);
   await safeExec('transactions.created_at', `ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
   await safeExec('transaction_items.discount', `ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.status', `ALTER TABLE transactions ADD COLUMN status VARCHAR(20) DEFAULT 'completed'`);
+  await safeExec('transactions.void_reason', `ALTER TABLE transactions ADD COLUMN void_reason TEXT DEFAULT NULL`);
+  await safeExec('transactions.voided_by', `ALTER TABLE transactions ADD COLUMN voided_by VARCHAR(100) DEFAULT NULL`);
+  await safeExec('transactions.voided_at', `ALTER TABLE transactions ADD COLUMN voided_at TIMESTAMP NULL DEFAULT NULL`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
   res.json({ results });
@@ -570,6 +574,82 @@ app.get('/api/transactions/:id', authenticateToken, async (req, res) => {
     console.error('Get transaction detail error:', err);
     res.status(500).json({ error: 'Gagal mengambil detail transaksi.' });
   }
+});
+
+// VOID transaction
+app.post('/api/transactions/:id/void', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Alasan void wajib diisi.' });
+
+    const [tx] = await conn.query('SELECT * FROM transactions WHERE id = ?', [req.params.id]);
+    if (tx.length === 0) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    if (tx[0].status === 'void') return res.status(400).json({ error: 'Transaksi sudah di-void.' });
+    if (tx[0].status === 'refund') return res.status(400).json({ error: 'Transaksi sudah di-refund.' });
+
+    // Restore stock
+    const [items] = await conn.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [req.params.id]);
+    for (const item of items) {
+      await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
+    }
+
+    // Update customer stats
+    if (tx[0].customer_id) {
+      await conn.query('UPDATE customers SET total_transactions = total_transactions - 1, total_spent = total_spent - ? WHERE id = ?', [tx[0].total, tx[0].customer_id]);
+    }
+
+    await conn.query(
+      'UPDATE transactions SET status = ?, void_reason = ?, voided_by = ?, voided_at = NOW() WHERE id = ?',
+      ['void', reason, req.user.name || req.user.username, req.params.id]
+    );
+
+    await conn.commit();
+    res.json({ message: 'Transaksi berhasil di-void.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Void error:', err);
+    res.status(500).json({ error: 'Gagal void transaksi.' });
+  } finally { conn.release(); }
+});
+
+// REFUND transaction
+app.post('/api/transactions/:id/refund', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Alasan refund wajib diisi.' });
+
+    const [tx] = await conn.query('SELECT * FROM transactions WHERE id = ?', [req.params.id]);
+    if (tx.length === 0) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    if (tx[0].status === 'void') return res.status(400).json({ error: 'Transaksi sudah di-void.' });
+    if (tx[0].status === 'refund') return res.status(400).json({ error: 'Transaksi sudah di-refund.' });
+
+    // Restore stock
+    const [items] = await conn.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [req.params.id]);
+    for (const item of items) {
+      await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
+    }
+
+    // Update customer stats
+    if (tx[0].customer_id) {
+      await conn.query('UPDATE customers SET total_transactions = total_transactions - 1, total_spent = total_spent - ? WHERE id = ?', [tx[0].total, tx[0].customer_id]);
+    }
+
+    await conn.query(
+      'UPDATE transactions SET status = ?, void_reason = ?, voided_by = ?, voided_at = NOW() WHERE id = ?',
+      ['refund', reason, req.user.name || req.user.username, req.params.id]
+    );
+
+    await conn.commit();
+    res.json({ message: 'Transaksi berhasil di-refund.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Refund error:', err);
+    res.status(500).json({ error: 'Gagal refund transaksi.' });
+  } finally { conn.release(); }
 });
 
 // GET sales report
