@@ -859,7 +859,7 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
     const [revenue] = await pool.query(
       `SELECT COALESCE(SUM(t.total), 0) as total_revenue,
               COALESCE(SUM(t.tax_amount), 0) as total_tax,
-              COALESCE(SUM(t.service_amount), 0) as total_service,
+              COALESCE(SUM(t.service_charge), 0) as total_service,
               COALESCE(SUM(t.discount), 0) as total_discount,
               COUNT(*) as total_transactions
        FROM transactions t 
