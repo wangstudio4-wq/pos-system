@@ -1103,9 +1103,34 @@ function showReceipt(payload, result) {
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-footer">Terima kasih telah berbelanja!<br>Powered by MajooKasir</div>';
   html += '</div></div>';
-  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button><button class="btn btn-primary" onclick="window.print()">🖨️ Cetak</button></div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button><button class="btn btn-primary" onclick="printReceipt()">🖨️ Cetak</button></div>';
 
   openModal(html);
+  document.querySelector('.modal-overlay').id = 'receiptModal';
+}
+
+function printReceipt() {
+  const content = document.getElementById('receiptContent');
+  if (!content) { window.print(); return; }
+  const printWin = window.open('', '_blank', 'width=400,height=600');
+  printWin.document.write('<html><head><title>Struk</title><style>');
+  printWin.document.write('body { font-family: "Courier New", monospace; font-size: 13px; max-width: 300px; margin: 0 auto; padding: 20px; }');
+  printWin.document.write('.receipt-header { text-align: center; margin-bottom: 10px; }');
+  printWin.document.write('.receipt-header h3 { font-size: 16px; margin: 0; }');
+  printWin.document.write('.receipt-divider { border-top: 1px dashed #333; margin: 6px 0; }');
+  printWin.document.write('.receipt-row { display: flex; justify-content: space-between; font-size: 12px; }');
+  printWin.document.write('.receipt-item { margin-bottom: 4px; }');
+  printWin.document.write('.receipt-item .item-name { font-size: 12px; }');
+  printWin.document.write('.receipt-item .item-detail { font-size: 11px; color: #555; display: flex; justify-content: space-between; }');
+  printWin.document.write('.receipt-total { font-weight: 700; font-size: 14px; }');
+  printWin.document.write('.receipt-footer { text-align: center; margin-top: 10px; font-size: 11px; color: #666; }');
+  printWin.document.write('</style></head><body>');
+  printWin.document.write(content.innerHTML);
+  printWin.document.write('</body></html>');
+  printWin.document.close();
+  printWin.focus();
+  printWin.print();
+  printWin.close();
 }
 
 // ============ PRODUCTS ============
