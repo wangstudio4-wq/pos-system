@@ -1114,23 +1114,24 @@ function printReceipt() {
   if (!content) { window.print(); return; }
   const printWin = window.open('', '_blank', 'width=400,height=600');
   printWin.document.write('<html><head><title>Struk</title><style>');
-  printWin.document.write('body { font-family: "Courier New", monospace; font-size: 13px; max-width: 300px; margin: 0 auto; padding: 20px; }');
-  printWin.document.write('.receipt-header { text-align: center; margin-bottom: 10px; }');
-  printWin.document.write('.receipt-header h3 { font-size: 16px; margin: 0; }');
-  printWin.document.write('.receipt-divider { border-top: 1px dashed #333; margin: 6px 0; }');
-  printWin.document.write('.receipt-row { display: flex; justify-content: space-between; font-size: 12px; }');
+  printWin.document.write('@page { size: 80mm auto; margin: 0; }');
+  printWin.document.write('body { font-family: "Courier New", monospace; font-size: 12pt; width: 72mm; margin: 0 auto; padding: 4mm; }');
+  printWin.document.write('.receipt-header { text-align: center; margin-bottom: 8px; }');
+  printWin.document.write('.receipt-header h3 { font-size: 16pt; margin: 0; font-weight: bold; }');
+  printWin.document.write('.receipt-header p { margin: 2px 0; }');
+  printWin.document.write('.receipt-divider { border-top: 1px dashed #000; margin: 6px 0; }');
+  printWin.document.write('.receipt-row { display: flex; justify-content: space-between; font-size: 11pt; margin: 2px 0; }');
   printWin.document.write('.receipt-item { margin-bottom: 4px; }');
-  printWin.document.write('.receipt-item .item-name { font-size: 12px; }');
-  printWin.document.write('.receipt-item .item-detail { font-size: 11px; color: #555; display: flex; justify-content: space-between; }');
-  printWin.document.write('.receipt-total { font-weight: 700; font-size: 14px; }');
-  printWin.document.write('.receipt-footer { text-align: center; margin-top: 10px; font-size: 11px; color: #666; }');
+  printWin.document.write('.receipt-item .item-name { font-size: 11pt; font-weight: bold; }');
+  printWin.document.write('.receipt-item .item-detail { font-size: 10pt; color: #333; display: flex; justify-content: space-between; }');
+  printWin.document.write('.receipt-total { font-weight: 700; font-size: 13pt; }');
+  printWin.document.write('.receipt-footer { text-align: center; margin-top: 10px; font-size: 9pt; color: #333; }');
   printWin.document.write('</style></head><body>');
   printWin.document.write(content.innerHTML);
   printWin.document.write('</body></html>');
   printWin.document.close();
   printWin.focus();
-  printWin.print();
-  printWin.close();
+  setTimeout(function() { printWin.print(); printWin.close(); }, 300);
 }
 
 // ============ PRODUCTS ============
