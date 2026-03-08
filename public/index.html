@@ -668,14 +668,7 @@ tbody tr:hover { background: #f8fafc; }
 }
 
 /* Print */
-@media print {
-  body * { visibility: hidden; }
-  #receiptModal, #receiptModal * { visibility: visible; }
-  #receiptModal { position: absolute; left: 0; top: 0; width: 100%; }
-  .modal-overlay { background: #fff; }
-  .modal-footer { display: none; }
-  .modal-close { display: none; }
-}
+/* Print handled by #printOverlay - see below */
 
 /* Shift history table */
 .shift-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
@@ -748,8 +741,9 @@ tbody tr:hover { background: #f8fafc; }
 body.printing-mode > *:not(#printOverlay) { display: none !important; }
 
 @media print {
+  body > *:not(#printOverlay) { display: none !important; }
+  #printOverlay { position: static !important; display: block !important; }
   .print-toolbar { display: none !important; }
-  #printOverlay { position: static; }
   .print-receipt-body { margin: 0 auto; }
   @page { size: 80mm auto; margin: 0; }
 }
