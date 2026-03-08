@@ -2663,7 +2663,7 @@ async function closeShift() {
       const diff = s.difference || 0;
       const diffColor = diff >= 0 ? 'var(--success)' : 'var(--danger, #ef4444)';
       const diffLabel = diff >= 0 ? 'Lebih' : 'Kurang';
-      showModal('<div class="modal-header"><h3>📊 Ringkasan Shift</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+      openModal('<div class="modal-header"><h3>📊 Ringkasan Shift</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
         '<div class="modal-body" style="padding:16px;">' +
         '<div class="receipt-row"><span>Kas Awal</span><span>' + formatRp(s.opening_cash) + '</span></div>' +
         '<div class="receipt-row"><span>Total Penjualan</span><span>' + formatRp(s.total_sales) + '</span></div>' +
