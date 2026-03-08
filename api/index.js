@@ -117,7 +117,7 @@ app.post('/api/setup/init', async (req, res) => {
         product_name VARCHAR(100) NOT NULL,
         price DECIMAL(15,2) NOT NULL,
         cost_price DECIMAL(15,2) DEFAULT 0,
-        quantity INT NOT NULL,
+        qty INT NOT NULL,
         subtotal DECIMAL(15,2) NOT NULL,
         discount DECIMAL(15,2) DEFAULT 0
       )`);
@@ -307,6 +307,8 @@ async function runAutoMigrate() {
   await safeExec('Default settings', `INSERT IGNORE INTO settings (id) VALUES (1)`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
+  // Fix: rename quantity → qty if old column exists
+  await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   console.log('✅ Auto-migrate completed');
 }
 runAutoMigrate().catch(err => console.error('Migration error:', err));
@@ -360,6 +362,8 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transactions.voided_at', `ALTER TABLE transactions ADD COLUMN voided_at TIMESTAMP NULL DEFAULT NULL`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
+  // Fix: rename quantity → qty if old column exists
+  await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   res.json({ results });
 });
 
