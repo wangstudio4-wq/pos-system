@@ -22,7 +22,7 @@ async function ensureShiftsTable() {
   )`);
 }
 
-// GET current open shift for user
+// GET current open shift for user (with sales summary)
 router.get('/current', authenticateToken, async (req, res) => {
   try {
     await ensureShiftsTable();
@@ -30,7 +30,24 @@ router.get('/current', authenticateToken, async (req, res) => {
       'SELECT * FROM shifts WHERE user_id = ? AND status = ? ORDER BY opened_at DESC LIMIT 1',
       [req.user.id, 'open']
     );
-    res.json({ shift: shifts.length > 0 ? shifts[0] : null });
+
+    let shift = shifts.length > 0 ? shifts[0] : null;
+
+    if (shift) {
+      // Calculate sales during this shift
+      const [sales] = await pool.query(
+        `SELECT COUNT(*) as total_transactions, 
+                COALESCE(SUM(total), 0) as total_sales
+         FROM transactions 
+         WHERE user_id = ? AND created_at >= ?`,
+        [req.user.id, shift.opened_at]
+      );
+      shift.total_transactions = sales[0].total_transactions;
+      shift.total_sales = parseFloat(sales[0].total_sales);
+      shift.expected_cash = parseFloat(shift.opening_cash) + parseFloat(sales[0].total_sales);
+    }
+
+    res.json({ shift });
   } catch (err) {
     console.error('Get current shift error:', err);
     res.status(500).json({ error: 'Gagal mengambil data shift: ' + err.message });

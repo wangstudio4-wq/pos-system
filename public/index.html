@@ -2537,13 +2537,23 @@ async function renderShifts() {
     // Current shift status
     html += '<div class="card shift-card mb-4">';
     if (currentShift) {
+      const expectedCash = currentShift.expected_cash || (parseFloat(currentShift.opening_cash || 0) + parseFloat(currentShift.total_sales || 0));
       html += '<div class="shift-status shift-open">';
       html += '<h3 style="color:var(--success)">🟢 Shift Sedang Berjalan</h3>';
       html += '<p class="mt-2">Dibuka oleh: <strong>' + escHtml(currentShift.user_name || currentShift.username || '-') + '</strong></p>';
       html += '<p>Waktu buka: <strong>' + formatDateTime(currentShift.opened_at) + '</strong></p>';
-      html += '<p>Kas awal: <strong>' + formatRp(currentShift.opening_cash) + '</strong></p>';
       html += '</div>';
-      html += '<div class="mt-4"><div class="form-group"><label>Kas Akhir (Rp)</label><input id="closingCash" type="number" min="0" placeholder="Masukkan jumlah kas akhir"></div>';
+      // Shift summary cards
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0;">';
+      html += '<div style="background:var(--bg);border-radius:10px;padding:12px;text-align:center;"><div style="font-size:11px;color:var(--text-secondary);">Kas Awal</div><div style="font-size:18px;font-weight:700;color:var(--primary);margin-top:4px;">' + formatRp(currentShift.opening_cash) + '</div></div>';
+      html += '<div style="background:var(--bg);border-radius:10px;padding:12px;text-align:center;"><div style="font-size:11px;color:var(--text-secondary);">Penjualan</div><div style="font-size:18px;font-weight:700;color:var(--success);margin-top:4px;">' + formatRp(currentShift.total_sales || 0) + '</div><div style="font-size:11px;color:var(--text-secondary);">' + (currentShift.total_transactions || 0) + ' transaksi</div></div>';
+      html += '<div style="background:var(--bg);border-radius:10px;padding:12px;text-align:center;"><div style="font-size:11px;color:var(--text-secondary);">Kas Diharapkan</div><div style="font-size:18px;font-weight:700;color:var(--primary);margin-top:4px;">' + formatRp(expectedCash) + '</div></div>';
+      html += '</div>';
+      // Close shift form
+      html += '<div class="mt-4"><div class="form-group"><label>💰 Kas Aktual (hitung uang fisik di laci kas)</label>';
+      html += '<input id="closingCash" type="number" min="0" value="' + expectedCash + '" oninput="calcShiftDiff(' + expectedCash + ')" style="font-size:18px;font-weight:700;text-align:center;padding:12px;">';
+      html += '</div>';
+      html += '<div id="shiftDiffInfo" style="text-align:center;padding:8px;border-radius:8px;margin-bottom:12px;background:rgba(34,197,94,0.1);color:var(--success);font-weight:600;">✅ Kas sesuai</div>';
       html += '<div class="form-group"><label>Catatan</label><textarea id="shiftNotes" placeholder="Catatan shift (opsional)"></textarea></div>';
       html += '<button class="btn btn-danger btn-block" onclick="closeShift()">🔴 Tutup Shift</button></div>';
     } else {
@@ -2583,6 +2593,26 @@ async function renderShifts() {
 
     main.innerHTML = html;
   } catch (err) { main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat: ' + escHtml(err.message) + '</div>'; }
+}
+
+function calcShiftDiff(expected) {
+  const actual = Number(document.getElementById('closingCash')?.value) || 0;
+  const diff = actual - expected;
+  const el = document.getElementById('shiftDiffInfo');
+  if (!el) return;
+  if (Math.abs(diff) < 1) {
+    el.style.background = 'rgba(34,197,94,0.1)';
+    el.style.color = 'var(--success)';
+    el.innerHTML = '✅ Kas sesuai!';
+  } else if (diff > 0) {
+    el.style.background = 'rgba(59,130,246,0.1)';
+    el.style.color = '#3b82f6';
+    el.innerHTML = '⬆️ Lebih <strong>' + formatRp(diff) + '</strong>';
+  } else {
+    el.style.background = 'rgba(239,68,68,0.1)';
+    el.style.color = '#ef4444';
+    el.innerHTML = '⬇️ Kurang <strong>' + formatRp(Math.abs(diff)) + '</strong>';
+  }
 }
 
 async function openShift() {
