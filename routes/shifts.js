@@ -27,8 +27,8 @@ router.get('/current', authenticateToken, async (req, res) => {
   try {
     await ensureShiftsTable();
     const [shifts] = await pool.query(
-      'SELECT * FROM shifts WHERE user_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1',
-      [req.user.id]
+      'SELECT * FROM shifts WHERE user_id = ? AND status = ? ORDER BY opened_at DESC LIMIT 1',
+      [req.user.id, 'open']
     );
     res.json({ shift: shifts.length > 0 ? shifts[0] : null });
   } catch (err) {
@@ -75,8 +75,8 @@ router.post('/open', authenticateToken, async (req, res) => {
 
     // Check if user already has an open shift
     const [existing] = await pool.query(
-      'SELECT id FROM shifts WHERE user_id = ? AND status = "open"',
-      [req.user.id]
+      'SELECT id FROM shifts WHERE user_id = ? AND status = ?',
+      [req.user.id, 'open']
     );
     if (existing.length > 0) {
       return res.status(400).json({ error: 'Anda sudah memiliki shift yang aktif. Tutup shift lama terlebih dahulu.' });
@@ -106,8 +106,8 @@ router.post('/close', authenticateToken, async (req, res) => {
     await ensureShiftsTable();
 
     const [shifts] = await pool.query(
-      'SELECT * FROM shifts WHERE user_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1',
-      [req.user.id]
+      'SELECT * FROM shifts WHERE user_id = ? AND status = ? ORDER BY opened_at DESC LIMIT 1',
+      [req.user.id, 'open']
     );
 
     if (shifts.length === 0) {
@@ -130,10 +130,10 @@ router.post('/close', authenticateToken, async (req, res) => {
     const expectedCash = parseFloat(shift.opening_cash) + parseFloat(totalSales);
 
     await pool.query(
-      `UPDATE shifts SET status = 'closed', closing_cash = ?, expected_cash = ?, 
+      `UPDATE shifts SET status = ?, closing_cash = ?, expected_cash = ?, 
        total_sales = ?, total_transactions = ?, notes = ?, closed_at = NOW() 
        WHERE id = ?`,
-      [closing_cash || 0, expectedCash, totalSales, totalTransactions, notes || null, shift.id]
+      ['closed', closing_cash || 0, expectedCash, totalSales, totalTransactions, notes || null, shift.id]
     );
 
     res.json({
