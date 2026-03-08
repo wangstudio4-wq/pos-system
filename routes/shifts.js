@@ -4,9 +4,28 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Auto-create shifts table if not exists
+async function ensureShiftsTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS shifts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    user_name VARCHAR(100) NOT NULL,
+    opening_cash DECIMAL(15,2) DEFAULT 0,
+    closing_cash DECIMAL(15,2) DEFAULT NULL,
+    expected_cash DECIMAL(15,2) DEFAULT NULL,
+    total_sales DECIMAL(15,2) DEFAULT 0,
+    total_transactions INT DEFAULT 0,
+    notes TEXT DEFAULT NULL,
+    status ENUM('open','closed') DEFAULT 'open',
+    opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP DEFAULT NULL
+  )`);
+}
+
 // GET current open shift for user
 router.get('/current', authenticateToken, async (req, res) => {
   try {
+    await ensureShiftsTable();
     const [shifts] = await pool.query(
       'SELECT * FROM shifts WHERE user_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1',
       [req.user.id]
@@ -14,13 +33,14 @@ router.get('/current', authenticateToken, async (req, res) => {
     res.json({ shift: shifts.length > 0 ? shifts[0] : null });
   } catch (err) {
     console.error('Get current shift error:', err);
-    res.status(500).json({ error: 'Gagal mengambil data shift.' });
+    res.status(500).json({ error: 'Gagal mengambil data shift: ' + err.message });
   }
 });
 
 // GET all shifts (admin/owner)
 router.get('/', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
+    await ensureShiftsTable();
     const { date, user_id } = req.query;
     let query = 'SELECT * FROM shifts';
     let params = [];
@@ -44,13 +64,15 @@ router.get('/', authenticateToken, authorizeRole('admin', 'owner'), async (req, 
     res.json(rows);
   } catch (err) {
     console.error('Get shifts error:', err);
-    res.status(500).json({ error: 'Gagal mengambil data shift.' });
+    res.status(500).json({ error: 'Gagal mengambil data shift: ' + err.message });
   }
 });
 
 // POST open shift
 router.post('/open', authenticateToken, async (req, res) => {
   try {
+    await ensureShiftsTable();
+
     // Check if user already has an open shift
     const [existing] = await pool.query(
       'SELECT id FROM shifts WHERE user_id = ? AND status = "open"',
@@ -61,9 +83,11 @@ router.post('/open', authenticateToken, async (req, res) => {
     }
 
     const { opening_cash } = req.body;
+    const userName = req.user.name || req.user.username || 'Unknown';
+    
     const [result] = await pool.query(
       'INSERT INTO shifts (user_id, user_name, opening_cash) VALUES (?, ?, ?)',
-      [req.user.id, req.user.name || req.user.username, opening_cash || 0]
+      [req.user.id, userName, opening_cash || 0]
     );
 
     res.status(201).json({
@@ -72,13 +96,15 @@ router.post('/open', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Open shift error:', err);
-    res.status(500).json({ error: 'Gagal membuka shift.' });
+    res.status(500).json({ error: 'Gagal membuka shift: ' + err.message });
   }
 });
 
 // POST close shift
 router.post('/close', authenticateToken, async (req, res) => {
   try {
+    await ensureShiftsTable();
+
     const [shifts] = await pool.query(
       'SELECT * FROM shifts WHERE user_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1',
       [req.user.id]
@@ -123,7 +149,7 @@ router.post('/close', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Close shift error:', err);
-    res.status(500).json({ error: 'Gagal menutup shift.' });
+    res.status(500).json({ error: 'Gagal menutup shift: ' + err.message });
   }
 });
 

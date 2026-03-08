@@ -4,20 +4,35 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Auto-create customers table if not exists
+async function ensureCustomersTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS customers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) DEFAULT NULL,
+    email VARCHAR(100) DEFAULT NULL,
+    address TEXT DEFAULT NULL,
+    points INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+}
+
 // GET all customers
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    await ensureCustomersTable();
     const [rows] = await pool.query('SELECT * FROM customers ORDER BY name ASC');
     res.json(rows);
   } catch (err) {
     console.error('Get customers error:', err);
-    res.status(500).json({ error: 'Gagal mengambil data pelanggan.' });
+    res.status(500).json({ error: 'Gagal mengambil data pelanggan: ' + err.message });
   }
 });
 
 // GET customer by id with transaction history
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureCustomersTable();
     const [customers] = await pool.query('SELECT * FROM customers WHERE id = ?', [req.params.id]);
     if (customers.length === 0) return res.status(404).json({ error: 'Pelanggan tidak ditemukan.' });
 
@@ -29,13 +44,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
     res.json({ customer: customers[0], transactions });
   } catch (err) {
     console.error('Get customer detail error:', err);
-    res.status(500).json({ error: 'Gagal mengambil detail pelanggan.' });
+    res.status(500).json({ error: 'Gagal mengambil detail pelanggan: ' + err.message });
   }
 });
 
 // POST new customer
 router.post('/', authenticateToken, async (req, res) => {
   try {
+    await ensureCustomersTable();
     const { name, phone, email, address } = req.body;
     if (!name) return res.status(400).json({ error: 'Nama pelanggan wajib diisi.' });
 
@@ -50,13 +66,14 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Add customer error:', err);
-    res.status(500).json({ error: 'Gagal menambahkan pelanggan.' });
+    res.status(500).json({ error: 'Gagal menambahkan pelanggan: ' + err.message });
   }
 });
 
 // PUT update customer
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureCustomersTable();
     const { name, phone, email, address } = req.body;
     await pool.query(
       'UPDATE customers SET name = ?, phone = ?, email = ?, address = ? WHERE id = ?',
@@ -65,7 +82,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Pelanggan berhasil diupdate!' });
   } catch (err) {
     console.error('Update customer error:', err);
-    res.status(500).json({ error: 'Gagal update pelanggan.' });
+    res.status(500).json({ error: 'Gagal update pelanggan: ' + err.message });
   }
 });
 
@@ -76,7 +93,7 @@ router.delete('/:id', authenticateToken, authorizeRole('admin', 'owner'), async 
     res.json({ message: 'Pelanggan berhasil dihapus!' });
   } catch (err) {
     console.error('Delete customer error:', err);
-    res.status(500).json({ error: 'Gagal menghapus pelanggan.' });
+    res.status(500).json({ error: 'Gagal menghapus pelanggan: ' + err.message });
   }
 });
 

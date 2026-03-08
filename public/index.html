@@ -2563,10 +2563,10 @@ async function openShift() {
   const cashEl = document.getElementById('openingCash');
   const cash = Number(cashEl?.value) || 0;
   try {
-    await apiFetch('/api/shifts/open', { method: 'POST', body: JSON.stringify({ opening_cash: cash }) });
-    showToast('Shift dibuka!', 'success');
+    const res = await apiFetch('/api/shifts/open', { method: 'POST', body: JSON.stringify({ opening_cash: cash }) });
+    showToast(res.message || 'Shift dibuka!', 'success');
     renderShifts();
-  } catch (err) { showToast(err.message, 'error'); }
+  } catch (err) { showToast('Gagal buka shift: ' + err.message, 'error'); }
 }
 
 async function closeShift() {
