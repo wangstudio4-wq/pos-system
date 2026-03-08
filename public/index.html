@@ -1857,7 +1857,7 @@ function renderCartPanel() {
 
   // Payment input
   if (selectedPayMethod === 'Cash') {
-    html += '<div class="payment-input"><input type="number" id="paymentAmount" placeholder="Jumlah bayar..." oninput="calcChange()" min="0"></div>';
+    html += '<div class="payment-input"><input type="text" inputmode="numeric" id="paymentAmount" placeholder="Jumlah bayar..." oninput="formatMoneyInput(this); calcChange()"></div>';
     html += '<div class="change-display">Kembalian: <span id="changeAmount">Rp 0</span></div>';
   }
 
@@ -1883,7 +1883,7 @@ function calcChange() {
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
   const { grandTotal } = calcTaxService(subtotal, totalDiscount);
-  const paid = Number(document.getElementById('paymentAmount')?.value) || 0;
+  const paid = parseMoneyValue('paymentAmount');
   const change = paid - grandTotal;
   const el = document.getElementById('changeAmount');
   if (el) {
@@ -1908,7 +1908,7 @@ async function processPayment() {
   let payment = grandTotal;
   if (selectedPayMethod === 'Cash') {
     const payEl = document.getElementById('paymentAmount');
-    payment = payEl ? Number(payEl.value) || 0 : 0;
+    payment = payEl ? parseMoneyValue('paymentAmount') : 0;
     if (payment < grandTotal) {
       showToast('Pembayaran kurang!', 'error');
       return;
@@ -2208,8 +2208,8 @@ function showProductModal(product) {
   html += '<div class="modal-body"><form id="productForm">';
   html += '<div class="form-group"><label>Barcode</label><input id="pBarcode" value="' + escHtml(product?.barcode || '') + '" placeholder="Barcode (opsional)"></div>';
   html += '<div class="form-group"><label>Nama Produk *</label><input id="pName" value="' + escHtml(product?.name || '') + '" required></div>';
-  html += '<div class="form-group"><label>Harga Jual *</label><input id="pPrice" type="number" min="0" value="' + (product?.price || '') + '" required></div>';
-  html += '<div class="form-group"><label>Harga Modal</label><input id="pCostPrice" type="number" min="0" value="' + (product?.cost_price || 0) + '" placeholder="Harga beli/modal"></div>';
+  html += '<div class="form-group"><label>Harga Jual *</label><input id="pPrice" type="text" inputmode="numeric" value="' + (product?.price ? formatDots(product.price) : '') + '" oninput="formatMoneyInput(this)" required></div>';
+  html += '<div class="form-group"><label>Harga Modal</label><input id="pCostPrice" type="text" inputmode="numeric" value="' + formatDots(product?.cost_price || 0) + '" oninput="formatMoneyInput(this)" placeholder="Harga beli/modal"></div>';
   html += '<div class="form-group"><label>Stok *</label><input id="pStock" type="number" min="0" value="' + (product?.stock ?? '') + '" required></div>';
   html += '<div class="form-group"><label>Stok Minimum</label><input id="pMinStock" type="number" min="0" value="' + (product?.min_stock || 0) + '"></div>';
   html += '<div class="form-group"><label>Kategori</label><select id="pCategory"><option value="">-- Pilih Kategori --</option>';
@@ -2226,8 +2226,8 @@ async function saveProduct(id) {
   const payload = {
     barcode: document.getElementById('pBarcode').value || null,
     name: document.getElementById('pName').value,
-    price: Number(document.getElementById('pPrice').value),
-    cost_price: Number(document.getElementById('pCostPrice').value) || 0,
+    price: parseMoneyValue('pPrice'),
+    cost_price: parseMoneyValue('pCostPrice'),
     stock: Number(document.getElementById('pStock').value),
     min_stock: Number(document.getElementById('pMinStock').value) || 0,
     category_id: document.getElementById('pCategory').value ? Number(document.getElementById('pCategory').value) : null
@@ -2494,7 +2494,7 @@ function showExpenseModal() {
   html += '<div class="modal-body"><form id="expenseForm">';
   html += '<div class="form-group"><label>Kategori *</label><select id="eCategory"><option value="Operasional">Operasional</option><option value="Belanja">Belanja</option><option value="Gaji">Gaji</option><option value="Listrik/Air">Listrik/Air</option><option value="Lainnya">Lainnya</option></select></div>';
   html += '<div class="form-group"><label>Deskripsi</label><input id="eDesc" placeholder="Deskripsi pengeluaran"></div>';
-  html += '<div class="form-group"><label>Jumlah (Rp) *</label><input id="eAmount" type="number" min="0" required></div>';
+  html += '<div class="form-group"><label>Jumlah (Rp) *</label><input id="eAmount" type="text" inputmode="numeric" oninput="formatMoneyInput(this)" required></div>';
   const today = new Date().toISOString().split('T')[0];
   html += '<div class="form-group"><label>Tanggal</label><input id="eDate" type="date" value="' + today + '"></div>';
   html += '</form></div>';
@@ -2506,7 +2506,7 @@ async function saveExpense() {
   const payload = {
     category: document.getElementById('eCategory').value,
     description: document.getElementById('eDesc').value,
-    amount: Number(document.getElementById('eAmount').value),
+    amount: parseMoneyValue('eAmount'),
     date: document.getElementById('eDate').value
   };
   if (!payload.amount) { showToast('Jumlah wajib diisi', 'error'); return; }
@@ -2551,7 +2551,7 @@ async function renderShifts() {
       html += '</div>';
       // Close shift form
       html += '<div class="mt-4"><div class="form-group"><label>💰 Kas Aktual (hitung uang fisik di laci kas)</label>';
-      html += '<input id="closingCash" type="number" min="0" value="' + expectedCash + '" oninput="calcShiftDiff(' + expectedCash + ')" style="font-size:18px;font-weight:700;text-align:center;padding:12px;">';
+      html += '<input id="closingCash" type="text" inputmode="numeric" value="' + formatDots(expectedCash) + '" oninput="formatMoneyInput(this); calcShiftDiff(' + expectedCash + ')" style="font-size:18px;font-weight:700;text-align:center;padding:12px;">';
       html += '</div>';
       html += '<div id="shiftDiffInfo" style="text-align:center;padding:8px;border-radius:8px;margin-bottom:12px;background:rgba(34,197,94,0.1);color:var(--success);font-weight:600;">✅ Kas sesuai</div>';
       html += '<div class="form-group"><label>Catatan</label><textarea id="shiftNotes" placeholder="Catatan shift (opsional)"></textarea></div>';
@@ -2561,7 +2561,7 @@ async function renderShifts() {
       html += '<h3>⚪ Tidak Ada Shift Aktif</h3>';
       html += '<p class="mt-2" style="color:var(--text-secondary)">Buka shift untuk mulai bertransaksi</p>';
       html += '</div>';
-      html += '<div class="mt-4"><div class="form-group"><label>Kas Awal (Rp)</label><input id="openingCash" type="number" min="0" placeholder="Masukkan jumlah kas awal"></div>';
+      html += '<div class="mt-4"><div class="form-group"><label>Kas Awal (Rp)</label><input id="openingCash" type="text" inputmode="numeric" oninput="formatMoneyInput(this)" placeholder="Masukkan jumlah kas awal"></div>';
       html += '<button class="btn btn-success btn-block" onclick="openShift()">🟢 Buka Shift</button></div>';
     }
     html += '</div>';
@@ -2595,8 +2595,28 @@ async function renderShifts() {
   } catch (err) { main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat: ' + escHtml(err.message) + '</div>'; }
 }
 
+function formatMoneyInput(el) {
+  const pos = el.selectionStart;
+  const oldLen = el.value.length;
+  let raw = el.value.replace(/\D/g, '');
+  el.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const newLen = el.value.length;
+  const newPos = Math.max(0, pos + (newLen - oldLen));
+  el.setSelectionRange(newPos, newPos);
+}
+
+function parseMoneyValue(id) {
+  const el = document.getElementById(id);
+  if (!el) return 0;
+  return Number(String(el.value).replace(/\./g, '')) || 0;
+}
+
+function formatDots(num) {
+  return String(Math.round(Number(num) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
 function calcShiftDiff(expected) {
-  const actual = Number(document.getElementById('closingCash')?.value) || 0;
+  const actual = parseMoneyValue('closingCash');
   const diff = actual - expected;
   const el = document.getElementById('shiftDiffInfo');
   if (!el) return;
@@ -2617,7 +2637,7 @@ function calcShiftDiff(expected) {
 
 async function openShift() {
   const cashEl = document.getElementById('openingCash');
-  const cash = Number(cashEl?.value) || 0;
+  const cash = parseMoneyValue('openingCash');
   try {
     const res = await apiFetch('/api/shifts/open', { method: 'POST', body: JSON.stringify({ opening_cash: cash }) });
     showToast(res.message || 'Shift dibuka!', 'success');
@@ -2631,7 +2651,7 @@ async function openShift() {
 async function closeShift() {
   const cashEl = document.getElementById('closingCash');
   const notesEl = document.getElementById('shiftNotes');
-  const cash = Number(cashEl?.value) || 0;
+  const cash = parseMoneyValue('closingCash');
   const notes = notesEl?.value || '';
   try {
     const result = await apiFetch('/api/shifts/close', { method: 'POST', body: JSON.stringify({ closing_cash: cash, notes: notes }) });
