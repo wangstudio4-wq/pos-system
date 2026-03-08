@@ -791,10 +791,14 @@ app.post('/api/transactions/:id/refund', authenticateToken, authorizeRole('admin
 // GET sales report
 app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { period } = req.query;
+    const { period, start_date, end_date } = req.query;
 
     let dateFilter = '';
-    if (period === 'today') {
+    let dateParams = [];
+    if (start_date && end_date) {
+      dateFilter = 'WHERE created_at >= ? AND created_at <= ?';
+      dateParams = [start_date + ' 00:00:00', end_date + ' 23:59:59'];
+    } else if (period === 'today') {
       dateFilter = 'WHERE DATE(created_at) = CURDATE()';
     } else if (period === 'week') {
       dateFilter = 'WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
@@ -802,32 +806,40 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
       dateFilter = 'WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
     }
 
+    const tDateFilter = dateFilter.replace(/created_at/g, 't.created_at');
+
     const [salesSummary] = await pool.query(
       `SELECT COUNT(*) as total_transactions, COALESCE(SUM(total), 0) as total_revenue,
        COALESCE(SUM(discount), 0) as total_discount
-       FROM transactions ${dateFilter}`
+       FROM transactions ${dateFilter}`, dateParams
     );
 
     const [perCashier] = await pool.query(
       `SELECT user_name, COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue 
        FROM transactions ${dateFilter} 
-       GROUP BY user_name ORDER BY revenue DESC`
+       GROUP BY user_name ORDER BY revenue DESC`, dateParams
     );
 
     const [topProducts] = await pool.query(
       `SELECT ti.product_name, SUM(ti.qty) as total_qty, SUM(ti.subtotal) as total_revenue
        FROM transaction_items ti
        JOIN transactions t ON ti.transaction_id = t.id
-       ${dateFilter.replace('created_at', 't.created_at')}
-       GROUP BY ti.product_name ORDER BY total_revenue DESC LIMIT 10`
+       ${tDateFilter}
+       GROUP BY ti.product_name ORDER BY total_revenue DESC LIMIT 10`, dateParams
     );
 
     // Payment method breakdown
     const [byPayment] = await pool.query(
       `SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total), 0) as total
        FROM transactions ${dateFilter}
-       GROUP BY payment_method ORDER BY total DESC`
+       GROUP BY payment_method ORDER BY total DESC`, dateParams
     );
+
+    // Average transaction
+    const avgTx = salesSummary[0].total_transactions > 0 
+      ? Math.round(salesSummary[0].total_revenue / salesSummary[0].total_transactions) 
+      : 0;
+    salesSummary[0].avg_transaction = avgTx;
 
     res.json({
       summary: salesSummary[0],

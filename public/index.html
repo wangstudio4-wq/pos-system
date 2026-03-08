@@ -2852,11 +2852,17 @@ async function closeShift() {
 
 // ============ REPORTS ============
 let reportPeriod = 'today';
+let reportStartDate = '';
+let reportEndDate = '';
 
 async function renderReports() {
   const main = document.getElementById('mainContent');
   try {
-    const data = await apiFetch('/api/reports/sales?period=' + reportPeriod);
+    let reportUrl = '/api/reports/sales?period=' + reportPeriod;
+    if (reportPeriod === 'custom' && reportStartDate && reportEndDate) {
+      reportUrl = '/api/reports/sales?start_date=' + reportStartDate + '&end_date=' + reportEndDate;
+    }
+    const data = await apiFetch(reportUrl);
     const summary = data.summary || {};
     const perCashier = data.per_cashier || [];
     const topProducts = data.top_products || [];
@@ -2864,12 +2870,23 @@ async function renderReports() {
 
     let html = '<div class="page-header"><h1>📈 Laporan Penjualan</h1><p>Analisis penjualan bisnis Anda</p></div>';
 
-    // Period filter
+    // Period filter with custom date
     html += '<div class="toolbar"><div class="category-pills">';
-    [['today','Hari Ini'],['week','Minggu Ini'],['month','Bulan Ini'],['all','Semua']].forEach(([val, label]) => {
+    [['today','Hari Ini'],['week','Minggu Ini'],['month','Bulan Ini'],['all','Semua'],['custom','📅 Custom']].forEach(([val, label]) => {
       html += '<div class="category-pill' + (reportPeriod === val ? ' active' : '') + '" onclick="changeReportPeriod(\'' + val + '\')">' + label + '</div>';
     });
     html += '</div></div>';
+
+    // Custom date range picker
+    if (reportPeriod === 'custom') {
+      html += '<div class="card" style="padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">';
+      html += '<div style="display:flex;align-items:center;gap:8px"><label style="font-weight:600;font-size:14px">Dari:</label>';
+      html += '<input type="date" id="reportStartDate" value="' + reportStartDate + '" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg-card);color:var(--text)" /></div>';
+      html += '<div style="display:flex;align-items:center;gap:8px"><label style="font-weight:600;font-size:14px">Sampai:</label>';
+      html += '<input type="date" id="reportEndDate" value="' + reportEndDate + '" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg-card);color:var(--text)" /></div>';
+      html += '<button class="btn btn-primary" onclick="applyReportDateRange()" style="padding:8px 20px">🔍 Tampilkan</button>';
+      html += '</div>';
+    }
 
     // Summary cards
     html += '<div class="stat-grid">';
@@ -2916,7 +2933,11 @@ async function renderReports() {
     html += '</div>';
 
     // Transaction list
-    const txData = await apiFetch('/api/transactions?start_date=&end_date=').catch(() => ({ transactions: [] }));
+    let txUrl = '/api/transactions?start_date=&end_date=';
+    if (reportPeriod === 'custom' && reportStartDate && reportEndDate) {
+      txUrl = '/api/transactions?start_date=' + reportStartDate + '&end_date=' + reportEndDate;
+    }
+    const txData = await apiFetch(txUrl).catch(() => ({ transactions: [] }));
     const txs = txData.transactions || txData || [];
     if (Array.isArray(txs) && txs.length > 0) {
       html += '<div class="card mt-4"><div class="card-header"><h3>🧾 Daftar Transaksi</h3></div>';
@@ -2950,11 +2971,17 @@ async function renderReports() {
 
 // ============ LABA RUGI ============
 let plPeriod = 'month';
+let plStartDate = '';
+let plEndDate = '';
 
 async function renderProfitLoss() {
   const main = document.getElementById('mainContent');
   try {
-    const data = await apiFetch('/api/reports/profit-loss?period=' + plPeriod);
+    let plUrl = '/api/reports/profit-loss?period=' + plPeriod;
+    if (plPeriod === 'custom' && plStartDate && plEndDate) {
+      plUrl = '/api/reports/profit-loss?start_date=' + plStartDate + '&end_date=' + plEndDate;
+    }
+    const data = await apiFetch(plUrl);
     const s = data.summary || {};
     const byProduct = data.by_product || [];
     const expByCat = data.expenses_by_category || [];
@@ -2962,12 +2989,23 @@ async function renderProfitLoss() {
 
     let html = '<div class="page-header"><h1>💹 Laporan Laba Rugi</h1><p>Analisis profitabilitas bisnis Anda</p></div>';
 
-    // Period filter
+    // Period filter with custom date
     html += '<div class="toolbar"><div class="category-pills">';
-    [['today','Hari Ini'],['week','7 Hari'],['month','30 Hari'],['all','Semua']].forEach(([val, label]) => {
+    [['today','Hari Ini'],['week','7 Hari'],['month','30 Hari'],['all','Semua'],['custom','📅 Custom']].forEach(([val, label]) => {
       html += '<div class="category-pill' + (plPeriod === val ? ' active' : '') + '" onclick="changePLPeriod(\'' + val + '\')">' + label + '</div>';
     });
     html += '</div></div>';
+
+    // Custom date range picker
+    if (plPeriod === 'custom') {
+      html += '<div class="card" style="padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">';
+      html += '<div style="display:flex;align-items:center;gap:8px"><label style="font-weight:600;font-size:14px">Dari:</label>';
+      html += '<input type="date" id="plStartDate" value="' + plStartDate + '" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg-card);color:var(--text)" /></div>';
+      html += '<div style="display:flex;align-items:center;gap:8px"><label style="font-weight:600;font-size:14px">Sampai:</label>';
+      html += '<input type="date" id="plEndDate" value="' + plEndDate + '" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg-card);color:var(--text)" /></div>';
+      html += '<button class="btn btn-primary" onclick="applyPLDateRange()" style="padding:8px 20px">🔍 Tampilkan</button>';
+      html += '</div>';
+    }
 
     // Summary cards - waterfall style
     html += '<div class="pl-summary">';
@@ -3055,12 +3093,34 @@ async function renderProfitLoss() {
 
 function changePLPeriod(p) {
   plPeriod = p;
+  if (p !== 'custom') { plStartDate = ''; plEndDate = ''; }
   renderProfitLoss();
 }
 
 function changeReportPeriod(p) {
   reportPeriod = p;
+  if (p !== 'custom') { reportStartDate = ''; reportEndDate = ''; }
   renderReports();
+}
+
+function applyReportDateRange() {
+  const s = document.getElementById('reportStartDate');
+  const e = document.getElementById('reportEndDate');
+  if (!s || !e || !s.value || !e.value) { showToast('Pilih tanggal mulai dan akhir', 'warning'); return; }
+  if (s.value > e.value) { showToast('Tanggal mulai tidak boleh lebih dari tanggal akhir', 'warning'); return; }
+  reportStartDate = s.value;
+  reportEndDate = e.value;
+  renderReports();
+}
+
+function applyPLDateRange() {
+  const s = document.getElementById('plStartDate');
+  const e = document.getElementById('plEndDate');
+  if (!s || !e || !s.value || !e.value) { showToast('Pilih tanggal mulai dan akhir', 'warning'); return; }
+  if (s.value > e.value) { showToast('Tanggal mulai tidak boleh lebih dari tanggal akhir', 'warning'); return; }
+  plStartDate = s.value;
+  plEndDate = e.value;
+  renderProfitLoss();
 }
 
 async function showTransactionDetail(id) {
