@@ -60,6 +60,7 @@ app.post('/api/setup/init', async (req, res) => {
         password VARCHAR(255) NOT NULL,
         name VARCHAR(100) NOT NULL,
         role ENUM('owner','admin','kasir') DEFAULT 'kasir',
+        pin VARCHAR(255) DEFAULT NULL,
         is_active TINYINT(1) DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )`);
@@ -309,6 +310,8 @@ async function runAutoMigrate() {
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
   // Fix: rename quantity → qty if old column exists
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
+  // Add PIN column for kasir login
+  await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
   console.log('✅ Auto-migrate completed');
 }
 runAutoMigrate().catch(err => console.error('Migration error:', err));

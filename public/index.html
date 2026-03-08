@@ -852,6 +852,19 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 .pl-bar { flex: 1; border-radius: 6px 6px 0 0; min-width: 30px; position: relative; transition: all 0.3s; }
 .pl-bar:hover { opacity: 0.8; }
 .pl-bar-label { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; white-space: nowrap; color: #666; }
+/* PIN Login Styles */
+.login-tab.active { background: white; color: #415D43; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #cbd5e1; background: transparent; transition: all .2s; }
+.pin-dot.filled { background: #415D43; border-color: #415D43; transform: scale(1.1); }
+.pin-dot.error { border-color: #ef4444; background: #ef4444; animation: pinShake .4s; }
+.pin-key { width: 100%; aspect-ratio: 1.4; border: 1px solid #e2e8f0; border-radius: 12px; font-size: 22px; font-weight: 600; background: white; cursor: pointer; transition: all .15s; color: #1e293b; }
+.pin-key:hover { background: #f1f5f9; }
+.pin-key:active { background: #e2e8f0; transform: scale(.95); }
+.cashier-card { padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; cursor: pointer; text-align: center; transition: all .2s; background: white; }
+.cashier-card:hover { border-color: #415D43; background: #f0fdf4; }
+.cashier-card .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg,#415D43,#709775); color: white; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; margin: 0 auto 8px; }
+.cashier-card .cname { font-weight: 600; font-size: 14px; color: #1e293b; }
+@keyframes pinShake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
 </style>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
@@ -912,23 +925,67 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 
 <!-- Login Page -->
 <div id="loginPage" style="display:none">
-  <div class="login-card">
+  <div class="login-card" style="max-width:420px;">
     <div style="text-align:center;margin-bottom:8px">
       <div style="width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:linear-gradient(135deg,#415D43,#709775);display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 25px rgba(65,93,67,.3)">🏪</div>
     </div>
     <h1>KasirPro</h1>
     <p class="subtitle">Sistem Point of Sale Modern</p>
-    <form id="loginForm">
-      <div class="form-group">
-        <label>Username</label>
-        <input type="text" id="loginUsername" placeholder="Masukkan username" required autocomplete="username">
+
+    <!-- Login Mode Tabs -->
+    <div id="loginTabs" style="display:flex;gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin-bottom:20px;">
+      <button onclick="switchLoginTab('pin')" id="tabPin" class="login-tab active" style="flex:1;padding:10px;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px;transition:all .2s;">🔢 PIN Kasir</button>
+      <button onclick="switchLoginTab('password')" id="tabPassword" class="login-tab" style="flex:1;padding:10px;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px;transition:all .2s;background:transparent;color:#64748b;">🔐 Password</button>
+    </div>
+
+    <!-- PIN Login Mode -->
+    <div id="pinLoginSection">
+      <div id="pinCashierList" style="margin-bottom:16px;">
+        <p style="text-align:center;color:#94a3b8;font-size:14px;">Memuat daftar kasir...</p>
       </div>
-      <div class="form-group">
-        <label>Password</label>
-        <input type="password" id="loginPassword" placeholder="Masukkan password" required autocomplete="current-password">
+      <div id="pinInputSection" style="display:none;">
+        <div id="pinSelectedUser" style="text-align:center;margin-bottom:12px;padding:10px;background:#f0fdf4;border-radius:10px;"></div>
+        <div id="pinDots" style="display:flex;justify-content:center;gap:10px;margin-bottom:20px;">
+          <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+          <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+        </div>
+        <div id="pinError" style="text-align:center;color:#ef4444;font-size:13px;margin-bottom:8px;min-height:20px;"></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:260px;margin:0 auto;">
+          <button class="pin-key" onclick="pinKeyPress('1')">1</button>
+          <button class="pin-key" onclick="pinKeyPress('2')">2</button>
+          <button class="pin-key" onclick="pinKeyPress('3')">3</button>
+          <button class="pin-key" onclick="pinKeyPress('4')">4</button>
+          <button class="pin-key" onclick="pinKeyPress('5')">5</button>
+          <button class="pin-key" onclick="pinKeyPress('6')">6</button>
+          <button class="pin-key" onclick="pinKeyPress('7')">7</button>
+          <button class="pin-key" onclick="pinKeyPress('8')">8</button>
+          <button class="pin-key" onclick="pinKeyPress('9')">9</button>
+          <button class="pin-key" onclick="pinKeyPress('clear')" style="font-size:14px;">✕</button>
+          <button class="pin-key" onclick="pinKeyPress('0')">0</button>
+          <button class="pin-key" onclick="pinKeyPress('back')" style="font-size:20px;">⌫</button>
+        </div>
+        <button onclick="pinBackToCashierList()" style="display:block;margin:16px auto 0;background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;">← Pilih kasir lain</button>
       </div>
-      <button type="submit" class="btn btn-primary btn-lg btn-block" id="loginBtn" style="background:linear-gradient(135deg,#415D43,#709775);box-shadow:0 4px 15px rgba(65,93,67,.3)">🔐 Masuk</button>
-    </form>
+      <div id="pinNoCashiers" style="display:none;text-align:center;padding:20px;">
+        <p style="color:#94a3b8;font-size:14px;">Belum ada kasir dengan PIN.<br>Owner bisa atur PIN di menu Kelola User.</p>
+      </div>
+    </div>
+
+    <!-- Password Login Mode (hidden by default) -->
+    <div id="passwordLoginSection" style="display:none;">
+      <form id="loginForm">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="loginUsername" placeholder="Masukkan username" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" placeholder="Masukkan password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block" id="loginBtn" style="background:linear-gradient(135deg,#415D43,#709775);box-shadow:0 4px 15px rgba(65,93,67,.3)">🔐 Masuk</button>
+      </form>
+    </div>
+
     <p style="text-align:center;margin-top:16px;font-size:14px;color:#94a3b8">Belum punya akun? <a href="#" onclick="showRegister();return false" style="color:#8FB996;text-decoration:none;font-weight:600">Daftar di sini</a></p>
     <p style="text-align:center;margin-top:12px;font-size:12px;color:#94a3b8">© 2025 KasirPro — All rights reserved</p>
   </div>
@@ -1134,9 +1191,128 @@ function showRegister() {
   document.getElementById('registerPage').style.display = 'flex';
 }
 
+// ============ PIN LOGIN ============
+let pinValue = '';
+let selectedCashierId = null;
+let selectedCashierName = '';
+
+function switchLoginTab(mode) {
+  const tabPin = document.getElementById('tabPin');
+  const tabPwd = document.getElementById('tabPassword');
+  const pinSection = document.getElementById('pinLoginSection');
+  const pwdSection = document.getElementById('passwordLoginSection');
+  if (mode === 'pin') {
+    tabPin.classList.add('active'); tabPin.style.background = ''; tabPin.style.color = '';
+    tabPwd.classList.remove('active'); tabPwd.style.background = 'transparent'; tabPwd.style.color = '#64748b';
+    pinSection.style.display = 'block'; pwdSection.style.display = 'none';
+    loadCashiers();
+  } else {
+    tabPwd.classList.add('active'); tabPwd.style.background = ''; tabPwd.style.color = '';
+    tabPin.classList.remove('active'); tabPin.style.background = 'transparent'; tabPin.style.color = '#64748b';
+    pwdSection.style.display = 'block'; pinSection.style.display = 'none';
+  }
+}
+
+async function loadCashiers() {
+  const listEl = document.getElementById('pinCashierList');
+  const noEl = document.getElementById('pinNoCashiers');
+  const inputEl = document.getElementById('pinInputSection');
+  try {
+    const data = await apiFetch('/api/auth/cashiers');
+    const cashiers = data.cashiers || [];
+    inputEl.style.display = 'none';
+    if (cashiers.length === 0) {
+      listEl.style.display = 'none';
+      noEl.style.display = 'block';
+      return;
+    }
+    noEl.style.display = 'none';
+    listEl.style.display = 'block';
+    let html = '<p style="font-size:13px;color:#64748b;margin-bottom:10px;text-align:center;">Pilih kasir:</p>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;">';
+    cashiers.forEach(c => {
+      html += '<div class="cashier-card" onclick="selectCashier(' + c.id + ',\'' + escHtml(c.name).replace(/'/g, "\\'") + '\')">';
+      html += '<div class="avatar">' + escHtml(c.name.charAt(0).toUpperCase()) + '</div>';
+      html += '<div class="cname">' + escHtml(c.name) + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    listEl.innerHTML = html;
+  } catch (err) {
+    listEl.innerHTML = '<p style="text-align:center;color:#ef4444;font-size:14px;">Gagal memuat kasir</p>';
+  }
+}
+
+function selectCashier(id, name) {
+  selectedCashierId = id;
+  selectedCashierName = name;
+  pinValue = '';
+  document.getElementById('pinCashierList').style.display = 'none';
+  document.getElementById('pinNoCashiers').style.display = 'none';
+  document.getElementById('pinInputSection').style.display = 'block';
+  document.getElementById('pinSelectedUser').innerHTML = '<strong style="color:#415D43;">' + escHtml(name) + '</strong>';
+  document.getElementById('pinError').textContent = '';
+  updatePinDots();
+}
+
+function pinBackToCashierList() {
+  selectedCashierId = null;
+  pinValue = '';
+  document.getElementById('pinInputSection').style.display = 'none';
+  loadCashiers();
+}
+
+function updatePinDots() {
+  const dots = document.querySelectorAll('#pinDots .pin-dot');
+  dots.forEach((dot, i) => {
+    dot.classList.remove('filled', 'error');
+    if (i < pinValue.length) dot.classList.add('filled');
+  });
+}
+
+async function pinKeyPress(key) {
+  if (key === 'clear') {
+    pinValue = '';
+    document.getElementById('pinError').textContent = '';
+    updatePinDots();
+    return;
+  }
+  if (key === 'back') {
+    pinValue = pinValue.slice(0, -1);
+    document.getElementById('pinError').textContent = '';
+    updatePinDots();
+    return;
+  }
+  if (pinValue.length >= 6) return;
+  pinValue += key;
+  updatePinDots();
+  // Auto-submit when 6 digits entered
+  if (pinValue.length === 6) {
+    try {
+      const data = await apiFetch('/api/auth/login-pin', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: selectedCashierId, pin: pinValue })
+      });
+      token = data.token;
+      currentUser = data.user;
+      localStorage.setItem('pos_token', token);
+      showToast('Login berhasil! Selamat datang, ' + currentUser.name);
+      showApp();
+    } catch (err) {
+      // Show error and shake dots
+      document.getElementById('pinError').textContent = err.message || 'PIN salah';
+      const dots = document.querySelectorAll('#pinDots .pin-dot');
+      dots.forEach(d => { d.classList.remove('filled'); d.classList.add('error'); });
+      setTimeout(() => { pinValue = ''; updatePinDots(); }, 600);
+    }
+  }
+}
+
 function showLogin() {
   hideAllPages();
   document.getElementById('loginPage').style.display = 'flex';
+  // Default to PIN tab and load cashiers
+  switchLoginTab('pin');
 }
 
 async function showApp() {
@@ -1295,6 +1471,7 @@ const NAV_ITEMS = [
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin','kasir'] },
+  { id: 'changepin', icon: '🔢', label: 'Ganti PIN', roles: ['kasir'] },
 ];
 
 function renderSidebar() {
@@ -1336,6 +1513,7 @@ function navigateTo(page) {
     users: renderUsers,
     settings: renderSettings,
     password: renderPassword,
+    changepin: renderChangePin,
   };
   if (renderers[page]) renderers[page]();
 }
@@ -2978,14 +3156,16 @@ async function renderUsers() {
     let html = '<div class="page-header"><h1>👤 Kelola User</h1><p>Manajemen pengguna sistem</p></div>';
     html += '<div class="toolbar"><div class="spacer"></div><button class="btn btn-primary" onclick="showUserModal()">+ Tambah User</button></div>';
 
-    html += '<div class="card"><div class="overflow-x"><table><thead><tr><th>Username</th><th>Nama</th><th>Role</th><th>Aksi</th></tr></thead><tbody>';
+    html += '<div class="card"><div class="overflow-x"><table><thead><tr><th>Username</th><th>Nama</th><th>Role</th><th>PIN</th><th>Aksi</th></tr></thead><tbody>';
     if (users.length === 0) {
-      html += '<tr><td colspan="4">' + emptyHtml('👤', 'Belum ada user') + '</td></tr>';
+      html += '<tr><td colspan="5">' + emptyHtml('👤', 'Belum ada user') + '</td></tr>';
     } else {
       users.forEach(u => {
+        const pinStatus = u.role === 'kasir' ? (u.has_pin ? '<span style="color:var(--success)">✅</span>' : '<span style="color:#94a3b8">—</span>') : '<span style="color:#94a3b8">—</span>';
         html += '<tr><td><code>' + escHtml(u.username) + '</code></td>' +
           '<td><strong>' + escHtml(u.name) + '</strong></td>' +
           '<td><span class="role-badge role-' + escHtml(u.role) + '">' + escHtml(u.role) + '</span></td>' +
+          '<td>' + pinStatus + '</td>' +
           '<td><button class="btn btn-sm btn-primary" onclick=\'showUserModal(' + JSON.stringify(u).replace(/'/g, "\\'") + ')\'>✏️</button> ' +
           (u.id !== currentUser.id ? '<button class="btn btn-sm btn-danger" onclick="deleteUser(' + u.id + ')">🗑️</button>' : '') + '</td></tr>';
       });
@@ -3004,10 +3184,17 @@ function showUserModal(user) {
   if (!isEdit) {
     html += '<div class="form-group"><label>Password *</label><input id="uPassword" type="password" required></div>';
   }
-  html += '<div class="form-group"><label>Role *</label><select id="uRole"><option value="kasir"' + (user?.role === 'kasir' ? ' selected' : '') + '>Kasir</option><option value="admin"' + (user?.role === 'admin' ? ' selected' : '') + '>Admin</option><option value="owner"' + (user?.role === 'owner' ? ' selected' : '') + '>Owner</option></select></div>';
+  html += '<div class="form-group"><label>Role *</label><select id="uRole" onchange="togglePinField()"><option value="kasir"' + (user?.role === 'kasir' ? ' selected' : '') + '>Kasir</option><option value="admin"' + (user?.role === 'admin' ? ' selected' : '') + '>Admin</option><option value="owner"' + (user?.role === 'owner' ? ' selected' : '') + '>Owner</option></select></div>';
+  html += '<div id="pinFieldGroup" class="form-group" style="' + ((user?.role || 'kasir') === 'kasir' ? '' : 'display:none;') + '"><label>🔢 PIN Login (6 digit)' + (isEdit && user?.has_pin ? ' <span style="color:var(--success);font-size:12px;">✅ PIN sudah diatur</span>' : '') + '</label><input id="uPin" type="text" inputmode="numeric" maxlength="6" pattern="\\d{6}" placeholder="' + (isEdit ? 'Kosongkan jika tidak diubah' : 'Masukkan 6 digit PIN') + '"></div>';
   html += '</form></div>';
   html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveUser(' + (isEdit ? user.id : 'null') + ')">Simpan</button></div>';
   openModal(html);
+}
+
+function togglePinField() {
+  const role = document.getElementById('uRole')?.value;
+  const el = document.getElementById('pinFieldGroup');
+  if (el) el.style.display = (role === 'kasir') ? '' : 'none';
 }
 
 async function saveUser(id) {
@@ -3016,6 +3203,12 @@ async function saveUser(id) {
     name: document.getElementById('uName').value,
     role: document.getElementById('uRole').value
   };
+  // Include PIN if provided
+  const pinVal = document.getElementById('uPin')?.value || '';
+  if (pinVal) {
+    if (!/^\d{6}$/.test(pinVal)) { showToast('PIN harus 6 digit angka', 'error'); return; }
+    payload.pin = pinVal;
+  }
   if (!id) {
     payload.password = document.getElementById('uPassword').value;
     if (!payload.password) { showToast('Password wajib diisi', 'error'); return; }
@@ -3124,6 +3317,32 @@ function renderPassword() {
   html += '<button type="button" class="btn btn-primary" onclick="changePassword()">Simpan Password</button>';
   html += '</form></div>';
   main.innerHTML = html;
+}
+
+function renderChangePin() {
+  const main = document.getElementById('mainContent');
+  let html = '<div class="page-header"><h1>🔢 Ganti PIN</h1><p>Ubah PIN login Anda</p></div>';
+  html += '<div class="card" style="max-width:400px;margin:0 auto;padding:24px;">';
+  html += '<form id="changePinForm">';
+  html += '<div class="form-group"><label>PIN Lama</label><input type="password" id="cpOldPin" inputmode="numeric" maxlength="6" placeholder="Masukkan PIN lama (kosongkan jika belum punya)"></div>';
+  html += '<div class="form-group"><label>PIN Baru (6 digit) *</label><input type="password" id="cpNewPin" inputmode="numeric" maxlength="6" placeholder="Masukkan 6 digit PIN baru" required></div>';
+  html += '<div class="form-group"><label>Konfirmasi PIN Baru *</label><input type="password" id="cpNewPin2" inputmode="numeric" maxlength="6" placeholder="Ulangi PIN baru" required></div>';
+  html += '<button type="submit" class="btn btn-primary btn-block">💾 Simpan PIN</button>';
+  html += '</form></div>';
+  main.innerHTML = html;
+  document.getElementById('changePinForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const oldPin = document.getElementById('cpOldPin').value;
+    const newPin = document.getElementById('cpNewPin').value;
+    const newPin2 = document.getElementById('cpNewPin2').value;
+    if (!/^\d{6}$/.test(newPin)) { showToast('PIN baru harus 6 digit angka', 'error'); return; }
+    if (newPin !== newPin2) { showToast('Konfirmasi PIN tidak cocok', 'error'); return; }
+    try {
+      await apiFetch('/api/auth/change-pin', { method: 'POST', body: JSON.stringify({ old_pin: oldPin || null, new_pin: newPin }) });
+      showToast('PIN berhasil diubah!');
+      document.getElementById('changePinForm').reset();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 }
 
 async function changePassword() {
