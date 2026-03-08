@@ -1139,14 +1139,23 @@ function showLogin() {
   document.getElementById('loginPage').style.display = 'flex';
 }
 
-function showApp() {
+async function showApp() {
   hideAllPages();
   document.getElementById('appContainer').style.display = 'block';
   renderSidebar();
-  navigateTo(currentUser.role === 'kasir' ? 'pos' : 'dashboard');
   // Auto-migrate database (owner only, silent)
   if (currentUser.role === 'owner') {
     apiFetch('/api/auto-migrate').catch(() => {});
+  }
+  // Check active shift for kasir
+  try {
+    const shiftData = await apiFetch('/api/shifts/current').catch(() => ({ shift: null }));
+    activeShift = shiftData.shift || null;
+  } catch { activeShift = null; }
+  if (currentUser.role === 'kasir') {
+    navigateTo(activeShift ? 'pos' : 'shifts');
+  } else {
+    navigateTo('dashboard');
   }
 }
 
@@ -1280,7 +1289,7 @@ const NAV_ITEMS = [
   { id: 'categories', icon: '🏷️', label: 'Kategori', roles: ['owner','admin'] },
   { id: 'customers', icon: '👥', label: 'Pelanggan', roles: ['owner','admin'] },
   { id: 'expenses', icon: '💸', label: 'Pengeluaran', roles: ['owner','admin'] },
-  { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin'] },
+  { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin','kasir'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
   { id: 'profitloss', icon: '💹', label: 'Laba Rugi', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
@@ -1479,9 +1488,20 @@ let selectedCategory = null;
 let selectedPayMethod = 'Cash';
 let posSearchTerm = '';
 let heldOrders = JSON.parse(localStorage.getItem('kasirpro_held_orders') || '[]');
+let activeShift = null; // Track current active shift
 
 async function renderPOS() {
   const main = document.getElementById('mainContent');
+  // Check shift for kasir
+  if (currentUser.role === 'kasir' && !activeShift) {
+    main.innerHTML = '<div class="card" style="text-align:center;padding:40px 20px;">' +
+      '<div style="font-size:48px;margin-bottom:16px;">⏰</div>' +
+      '<h2 style="margin-bottom:8px;">Shift Belum Dibuka</h2>' +
+      '<p style="color:var(--text-secondary);margin-bottom:20px;">Anda harus membuka shift terlebih dahulu sebelum dapat melakukan transaksi.</p>' +
+      '<button class="btn btn-success" onclick="navigateTo(\'shifts\')" style="font-size:16px;padding:12px 32px;">🟢 Buka Shift Sekarang</button>' +
+      '</div>';
+    return;
+  }
   main.innerHTML = loadingHtml();
   try {
     const [prodData, catData, custData, settingsData] = await Promise.all([
@@ -1874,6 +1894,12 @@ function calcChange() {
 
 async function processPayment() {
   if (cart.length === 0) return;
+  // Kasir must have open shift
+  if (currentUser.role === 'kasir' && !activeShift) {
+    showToast('Buka shift terlebih dahulu sebelum transaksi!', 'error');
+    navigateTo('shifts');
+    return;
+  }
   const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
@@ -2565,6 +2591,9 @@ async function openShift() {
   try {
     const res = await apiFetch('/api/shifts/open', { method: 'POST', body: JSON.stringify({ opening_cash: cash }) });
     showToast(res.message || 'Shift dibuka!', 'success');
+    // Update active shift
+    const shiftData = await apiFetch('/api/shifts/current').catch(() => ({ shift: null }));
+    activeShift = shiftData.shift || null;
     renderShifts();
   } catch (err) { showToast('Gagal buka shift: ' + err.message, 'error'); }
 }
@@ -2575,8 +2604,26 @@ async function closeShift() {
   const cash = Number(cashEl?.value) || 0;
   const notes = notesEl?.value || '';
   try {
-    await apiFetch('/api/shifts/close', { method: 'POST', body: JSON.stringify({ closing_cash: cash, notes: notes }) });
+    const result = await apiFetch('/api/shifts/close', { method: 'POST', body: JSON.stringify({ closing_cash: cash, notes: notes }) });
+    activeShift = null;
     showToast('Shift ditutup!', 'success');
+    // Show summary if available
+    if (result.summary) {
+      const s = result.summary;
+      const diff = s.difference || 0;
+      const diffColor = diff >= 0 ? 'var(--success)' : 'var(--danger, #ef4444)';
+      const diffLabel = diff >= 0 ? 'Lebih' : 'Kurang';
+      showModal('<div class="modal-header"><h3>📊 Ringkasan Shift</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+        '<div class="modal-body" style="padding:16px;">' +
+        '<div class="receipt-row"><span>Kas Awal</span><span>' + formatRp(s.opening_cash) + '</span></div>' +
+        '<div class="receipt-row"><span>Total Penjualan</span><span>' + formatRp(s.total_sales) + '</span></div>' +
+        '<div class="receipt-row"><span>Total Transaksi</span><span>' + s.total_transactions + ' transaksi</span></div>' +
+        '<div class="receipt-row"><span>Kas Diharapkan</span><span>' + formatRp(s.expected_cash) + '</span></div>' +
+        '<div class="receipt-row"><span>Kas Akhir</span><span>' + formatRp(s.closing_cash) + '</span></div>' +
+        '<hr style="margin:8px 0">' +
+        '<div class="receipt-row" style="font-weight:bold;"><span>Selisih</span><span style="color:' + diffColor + '">' + diffLabel + ' ' + formatRp(Math.abs(diff)) + '</span></div>' +
+        '</div>');
+    }
     renderShifts();
   } catch (err) { showToast(err.message, 'error'); }
 }
