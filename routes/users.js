@@ -9,7 +9,7 @@ const router = express.Router();
 router.get('/', authenticateToken, authorizeRole('owner'), async (req, res) => {
   try {
     const [users] = await pool.query(
-      'SELECT id, username, name, role, is_active, pin IS NOT NULL as has_pin, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, name, role, is_active, pin IS NOT NULL as has_pin, created_at FROM users WHERE is_active = 1 ORDER BY created_at DESC'
     );
     res.json({ users });
   } catch (err) {
