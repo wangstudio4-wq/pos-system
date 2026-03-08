@@ -1144,6 +1144,10 @@ function showApp() {
   document.getElementById('appContainer').style.display = 'block';
   renderSidebar();
   navigateTo(currentUser.role === 'kasir' ? 'pos' : 'dashboard');
+  // Auto-migrate database (owner only, silent)
+  if (currentUser.role === 'owner') {
+    apiFetch('/api/auto-migrate').catch(() => {});
+  }
 }
 
 // ============ LOW STOCK NOTIFICATIONS ============
