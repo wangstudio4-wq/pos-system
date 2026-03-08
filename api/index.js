@@ -288,7 +288,7 @@ async function runAutoMigrate() {
   await safeExec('transactions.notes', `ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL`);
   await safeExec('transactions.user_name', `ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL`);
   // Backfill NULL user_name from users table
-  await safeExec('backfill.user_name', `UPDATE transactions t JOIN users u ON t.user_id = u.id SET t.user_name = u.name WHERE t.user_name IS NULL AND t.user_id IS NOT NULL`);
+  await safeExec('backfill.user_name', `UPDATE transactions t JOIN users u ON t.user_id = u.id SET t.user_name = COALESCE(u.name, u.username) WHERE (t.user_name IS NULL OR t.user_name = '') AND t.user_id IS NOT NULL`);
   await safeExec('transactions.created_at', `ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
   await safeExec('transaction_items.discount', `ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
   await safeExec('transactions.status', `ALTER TABLE transactions ADD COLUMN status VARCHAR(20) DEFAULT 'completed'`);
@@ -360,7 +360,7 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transactions.notes', `ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT NULL`);
   await safeExec('transactions.user_name', `ALTER TABLE transactions ADD COLUMN user_name VARCHAR(100) DEFAULT NULL`);
   // Backfill NULL user_name from users table
-  await safeExec('backfill.user_name', `UPDATE transactions t JOIN users u ON t.user_id = u.id SET t.user_name = u.name WHERE t.user_name IS NULL AND t.user_id IS NOT NULL`);
+  await safeExec('backfill.user_name', `UPDATE transactions t JOIN users u ON t.user_id = u.id SET t.user_name = COALESCE(u.name, u.username) WHERE (t.user_name IS NULL OR t.user_name = '') AND t.user_id IS NOT NULL`);
   await safeExec('transactions.created_at', `ALTER TABLE transactions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
   await safeExec('transaction_items.discount', `ALTER TABLE transaction_items ADD COLUMN discount DECIMAL(15,2) DEFAULT 0`);
   await safeExec('transactions.status', `ALTER TABLE transactions ADD COLUMN status VARCHAR(20) DEFAULT 'completed'`);
@@ -819,9 +819,9 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
     );
 
     const [perCashier] = await pool.query(
-      `SELECT COALESCE(user_name, 'Kasir') as user_name, COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue 
+      `SELECT CASE WHEN user_name IS NULL OR user_name = '' THEN 'Kasir' ELSE user_name END as user_name, COUNT(*) as transactions, COALESCE(SUM(total), 0) as revenue 
        FROM transactions ${dateFilter} 
-       GROUP BY COALESCE(user_name, 'Kasir') ORDER BY revenue DESC`, dateParams
+       GROUP BY CASE WHEN user_name IS NULL OR user_name = '' THEN 'Kasir' ELSE user_name END ORDER BY revenue DESC`, dateParams
     );
 
     const [topProducts] = await pool.query(

@@ -2902,7 +2902,7 @@ async function renderReports() {
     if (perCashier.length > 0) {
       html += '<div class="overflow-x"><table><thead><tr><th>Kasir</th><th>Transaksi</th><th>Revenue</th></tr></thead><tbody>';
       perCashier.forEach(c => {
-        html += '<tr><td><strong>' + escHtml(c.name || c.username || c.cashier_name || '-') + '</strong></td><td>' + (c.transactions || c.total_transactions || 0) + '</td><td>' + formatRp(c.revenue || c.total_revenue) + '</td></tr>';
+        html += '<tr><td><strong>' + escHtml(c.user_name || c.name || c.username || c.cashier_name || 'Kasir') + '</strong></td><td>' + (c.transactions || c.total_transactions || 0) + '</td><td>' + formatRp(c.revenue || c.total_revenue) + '</td></tr>';
       });
       html += '</tbody></table></div>';
     } else { html += emptyHtml('👤', 'Tidak ada data'); }
