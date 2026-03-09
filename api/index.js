@@ -474,9 +474,42 @@ async function runAutoMigrate() {
     product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
     system_stock INT DEFAULT 0, actual_stock INT DEFAULT 0,
     difference INT DEFAULT 0, notes TEXT DEFAULT NULL)`);
+  // Fase 2B: Multi-satuan
+  await safeExec('products.unit', `ALTER TABLE products ADD COLUMN unit VARCHAR(20) DEFAULT 'pcs'`);
+  await safeExec('products.purchase_unit', `ALTER TABLE products ADD COLUMN purchase_unit VARCHAR(20) DEFAULT NULL`);
+  await safeExec('products.conversion_ratio', `ALTER TABLE products ADD COLUMN conversion_ratio DECIMAL(10,4) DEFAULT 1`);
+  // Fase 2B: Harga Grosir
+  await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
+    id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
+    min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
+    UNIQUE KEY unique_tier (product_id, min_qty))`);
+  // Fase 2B: Kasbon
+  await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_phone VARCHAR(20) DEFAULT NULL,
+    transaction_id INT DEFAULT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    paid DECIMAL(15,2) DEFAULT 0,
+    remaining DECIMAL(15,2) NOT NULL,
+    status ENUM('unpaid','partial','paid') DEFAULT 'unpaid',
+    notes TEXT DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Create debt_payments', `CREATE TABLE IF NOT EXISTS debt_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    debt_id INT NOT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    payment_method VARCHAR(20) DEFAULT 'Cash',
+    notes TEXT DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   console.log('✅ Auto-migrate completed');
 }
-runAutoMigrate().catch(err => console.error('Migration error:', err));
+const migrationReady = runAutoMigrate().catch(err => console.error('Migration error:', err));
+// Ensure migration completes before handling any request (critical for Vercel serverless)
+app.use(async (req, res, next) => { await migrationReady; next(); });
 
 app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (req, res) => {
   const results = [];
