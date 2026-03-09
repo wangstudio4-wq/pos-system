@@ -1579,11 +1579,11 @@ async function renderHistory() {
       html += '<div class="card mb-4" style="padding:16px;">';
       html += '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">';
       html += '<div style="flex:1;min-width:140px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">📅 Dari</label>';
-      html += '<input type="date" id="histFilterStart" value="' + (historyFilterState.start_date || '') + '" max="' + today + '" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
+      html += '<input type="date" id="histFilterStart" value="' + (historyFilterState.start_date || '') + '" max="' + today + '" onchange="autoHistoryDateFilter()" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
       html += '<div style="flex:1;min-width:140px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">📅 Sampai</label>';
-      html += '<input type="date" id="histFilterEnd" value="' + (historyFilterState.end_date || '') + '" max="' + today + '" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
+      html += '<input type="date" id="histFilterEnd" value="' + (historyFilterState.end_date || '') + '" max="' + today + '" onchange="autoHistoryDateFilter()" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
       html += '<div style="flex:1;min-width:160px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">👤 Kasir</label>';
-      html += '<select id="histFilterUser" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;">';
+      html += '<select id="histFilterUser" onchange="applyHistoryFilter()" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;">';
       html += '<option value="">Semua Kasir</option>';
       historyUsersList.forEach(u => {
         const sel = (historyFilterState.user_id == u.id) ? ' selected' : '';
@@ -1627,6 +1627,12 @@ async function renderHistory() {
   } catch (err) {
     main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat histori: ' + escHtml(err.message) + '</div>';
   }
+}
+
+function autoHistoryDateFilter() {
+  const s = document.getElementById('histFilterStart').value;
+  const e = document.getElementById('histFilterEnd').value;
+  if (s && e) applyHistoryFilter();
 }
 
 function applyHistoryFilter() {
