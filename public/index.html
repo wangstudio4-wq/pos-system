@@ -863,11 +863,16 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 .cashier-card .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg,#415D43,#709775); color: white; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; margin: 0 auto 8px; }
 .cashier-card .cname { font-weight: 600; font-size: 14px; color: #1e293b; }
 @keyframes pinShake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
+.offline-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; text-align: center; padding: 6px 16px; font-size: 13px; font-weight: 600; display: none; animation: slideDown .3s ease; }
+.offline-bar.show { display: block; }
+.sync-badge { background: #f59e0b; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: 4px; animation: pulse-badge 2s infinite; }
+@keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 </style>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+<div class="offline-bar" id="offlineBar">📴 Mode Offline — Transaksi akan disimpan lokal & disync saat online</div>
 
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
@@ -1025,6 +1030,7 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
             <span class="role-badge" id="userRoleBadge"></span>
           </div>
         </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px"><button class="btn-logout" style="flex:1" onclick="syncPendingTransactions()">🔄 Sync <span id="pendingSyncBadge" class="sync-badge" style="display:none">0</span></button></div>
         <button class="btn-logout" onclick="logout()">🚪 Keluar</button>
       </div>
     </aside>
@@ -1101,13 +1107,44 @@ function showToast(message, type = 'success') {
 async function apiFetch(url, options = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = 'Bearer ' + token;
-  const res = await fetch(API + url, { ...options, headers: { ...headers, ...options.headers } });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data.error || data.message || 'Terjadi kesalahan';
-    throw new Error(msg);
+  try {
+    const res = await fetch(API + url, { ...options, headers: { ...headers, ...options.headers } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.error || data.message || 'Terjadi kesalahan';
+      throw new Error(msg);
+    }
+    return data;
+  } catch (err) {
+    if (!navigator.onLine && (!options.method || options.method === 'GET')) {
+      return await offlineFallback(url);
+    }
+    throw err;
   }
-  return data;
+}
+
+async function offlineFallback(url) {
+  try {
+    if (url.includes('/api/products')) {
+      var prods = await idbGetAll('products');
+      return { products: prods };
+    }
+    if (url.includes('/api/categories')) {
+      var cats = await idbGetAll('categories');
+      return { categories: cats };
+    }
+    if (url.includes('/api/settings')) {
+      var all = await idbGetAll('settings');
+      return all[0] || {};
+    }
+    if (url.includes('/api/price-tiers')) {
+      return await idbGetAll('priceTiers');
+    }
+    if (url.includes('/api/product-discounts/active')) {
+      return await idbGetAll('discounts');
+    }
+  } catch (e) {}
+  throw new Error('Tidak tersedia dalam mode offline');
 }
 
 function loadingHtml() {
@@ -1484,6 +1521,8 @@ const NAV_ITEMS = [
   { id: 'stockin', icon: '📥', label: 'Stok Masuk', roles: ['owner','admin'] },
   { id: 'stockopname', icon: '📋', label: 'Stok Opname', roles: ['owner','admin'] },
   { id: 'stockcard', icon: '📊', label: 'Kartu Stok', roles: ['owner','admin'] },
+  { id: 'comparison', icon: '⚖️', label: 'Perbandingan Periode', roles: ['owner','admin'] },
+  { id: 'slowmoving', icon: '🐌', label: 'Produk Slow Moving', roles: ['owner','admin'] },
   { id: 'importproducts', icon: '📤', label: 'Import Produk', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
@@ -1530,6 +1569,8 @@ function navigateTo(page) {
     stockin: renderStockIn,
     stockopname: renderStockOpname,
     stockcard: renderStockCard,
+    comparison: renderComparison,
+    slowmoving: renderSlowMoving,
     importproducts: renderImportProducts,
     users: renderUsers,
     settings: renderSettings,
@@ -1793,6 +1834,7 @@ async function renderPOS() {
     selectedPayMethod = 'Cash';
     posSearchTerm = '';
     renderPOSPage();
+    cachePOSData();
   } catch (err) {
     main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
   }
@@ -2294,8 +2336,14 @@ async function processPayment() {
   };
 
   try {
-    const result = await apiFetch('/api/transactions', { method: 'POST', body: JSON.stringify(payload) });
-    showToast('Transaksi berhasil!', 'success');
+    let result;
+    if (!navigator.onLine) {
+      result = await addOfflineTx(payload);
+      showToast('📴 Transaksi disimpan offline — akan disync saat online', 'info');
+    } else {
+      result = await apiFetch('/api/transactions', { method: 'POST', body: JSON.stringify(payload) });
+      showToast('Transaksi berhasil!', 'success');
+    }
     showReceipt(payload, result);
     cart = [];
     // Refresh products stock
@@ -3962,6 +4010,233 @@ async function renderReports() {
 }
 
 
+// ============ PERBANDINGAN PERIODE ============
+var compPeriodA = { start: '', end: '' };
+var compPeriodB = { start: '', end: '' };
+var compPresetA = 'this_week';
+var compPresetB = 'last_week';
+
+function getPresetDates(preset) {
+  var now = new Date();
+  var today = now.toISOString().slice(0,10);
+  var d = new Date(now);
+  if (preset === 'today') return { start: today, end: today };
+  if (preset === 'yesterday') { d.setDate(d.getDate()-1); var y = d.toISOString().slice(0,10); return { start: y, end: y }; }
+  if (preset === 'this_week') { var day = now.getDay(); var diff = day === 0 ? 6 : day - 1; d.setDate(now.getDate() - diff); return { start: d.toISOString().slice(0,10), end: today }; }
+  if (preset === 'last_week') { var day2 = now.getDay(); var diff2 = day2 === 0 ? 6 : day2 - 1; d.setDate(now.getDate() - diff2 - 7); var s = d.toISOString().slice(0,10); d.setDate(d.getDate() + 6); return { start: s, end: d.toISOString().slice(0,10) }; }
+  if (preset === 'this_month') { return { start: today.slice(0,8) + '01', end: today }; }
+  if (preset === 'last_month') { d.setDate(0); var e = d.toISOString().slice(0,10); d.setDate(1); return { start: d.toISOString().slice(0,10), end: e }; }
+  return { start: '', end: '' };
+}
+
+function setCompPreset(period, preset) {
+  if (period === 'A') { compPresetA = preset; compPeriodA = getPresetDates(preset); }
+  else { compPresetB = preset; compPeriodB = getPresetDates(preset); }
+  renderComparison();
+}
+
+function applyCompCustomDate(period) {
+  if (period === 'A') {
+    var s = document.getElementById('compStartA'); var e = document.getElementById('compEndA');
+    if (s && e && s.value && e.value) { compPeriodA = { start: s.value, end: e.value }; compPresetA = 'custom'; }
+  } else {
+    var s2 = document.getElementById('compStartB'); var e2 = document.getElementById('compEndB');
+    if (s2 && e2 && s2.value && e2.value) { compPeriodB = { start: s2.value, end: e2.value }; compPresetB = 'custom'; }
+  }
+  renderComparison();
+}
+
+async function renderComparison() {
+  var main = document.getElementById('mainContent');
+  
+  if (!compPeriodA.start) compPeriodA = getPresetDates(compPresetA);
+  if (!compPeriodB.start) compPeriodB = getPresetDates(compPresetB);
+
+  var html = '<div class="page-header"><h1>\u2696\uFE0F Perbandingan Periode</h1><p>Bandingkan performa penjualan antar periode</p></div>';
+
+  var presets = [['today','Hari Ini'],['yesterday','Kemarin'],['this_week','Minggu Ini'],['last_week','Minggu Lalu'],['this_month','Bulan Ini'],['last_month','Bulan Lalu'],['custom','Custom']];
+  
+  var periods = ['A','B'];
+  for (var idx = 0; idx < periods.length; idx++) {
+    var p = periods[idx];
+    var preset = p === 'A' ? compPresetA : compPresetB;
+    var dates = p === 'A' ? compPeriodA : compPeriodB;
+    var color = idx === 0 ? '#3b82f6' : '#8b5cf6';
+    html += '<div class="card mb-3" style="border-left:4px solid ' + color + '">';
+    html += '<div style="padding:12px 16px;font-weight:700;color:' + color + '">Periode ' + p + ': ' + (dates.start || '?') + ' s/d ' + (dates.end || '?') + '</div>';
+    html += '<div style="padding:0 16px 12px;display:flex;flex-wrap:wrap;gap:6px">';
+    for (var pi = 0; pi < presets.length; pi++) {
+      var pr = presets[pi];
+      html += '<div class="category-pill' + (preset === pr[0] ? ' active' : '') + '" onclick="setCompPreset(\'' + p + '\',\'' + pr[0] + '\')">' + pr[1] + '</div>';
+    }
+    html += '</div>';
+    if (preset === 'custom') {
+      html += '<div style="padding:0 16px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px">';
+      html += '<input type="date" id="compStart' + p + '" value="' + dates.start + '" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">';
+      html += '<span>s/d</span>';
+      html += '<input type="date" id="compEnd' + p + '" value="' + dates.end + '" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">';
+      html += '<button class="btn btn-primary" onclick="applyCompCustomDate(\'' + p + '\')" style="padding:6px 16px;font-size:13px">Terapkan</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  if (compPeriodA.start && compPeriodA.end && compPeriodB.start && compPeriodB.end) {
+    try {
+      var data = await apiFetch('/api/reports/comparison?start_a=' + compPeriodA.start + '&end_a=' + compPeriodA.end + '&start_b=' + compPeriodB.start + '&end_b=' + compPeriodB.end);
+      var a = data.period_a.summary;
+      var b = data.period_b.summary;
+
+      function pctChange(newVal, oldVal) {
+        if (Number(oldVal) === 0) return Number(newVal) > 0 ? 100 : 0;
+        return Math.round((Number(newVal) - Number(oldVal)) / Number(oldVal) * 100);
+      }
+      function changeIndicator(pct) {
+        if (pct > 0) return '<span style="color:#10b981;font-weight:700">\u25B2 +' + pct + '%</span>';
+        if (pct < 0) return '<span style="color:#ef4444;font-weight:700">\u25BC ' + pct + '%</span>';
+        return '<span style="color:#94a3b8;font-weight:700">= 0%</span>';
+      }
+
+      html += '<div class="stat-grid">';
+      var metrics = [
+        { label: '\uD83D\uDCB0 Pendapatan', valA: a.total_revenue, valB: b.total_revenue, isMoney: true },
+        { label: '\uD83E\uDDFE Transaksi', valA: a.total_transactions, valB: b.total_transactions, isMoney: false },
+        { label: '\uD83D\uDCCA Rata-rata', valA: a.avg_transaction, valB: b.avg_transaction, isMoney: true }
+      ];
+      for (var mi = 0; mi < metrics.length; mi++) {
+        var m = metrics[mi];
+        var pct = pctChange(m.valA, m.valB);
+        html += '<div class="stat-card"><div style="font-size:13px;color:#94a3b8;margin-bottom:8px">' + m.label + '</div>';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">';
+        html += '<div style="text-align:center"><div style="font-size:10px;color:#3b82f6;font-weight:600">PERIODE A</div><div style="font-size:18px;font-weight:800">' + (m.isMoney ? formatRp(m.valA) : (m.valA || 0)) + '</div></div>';
+        html += '<div style="text-align:center"><div style="font-size:10px;color:#94a3b8">VS</div>' + changeIndicator(pct) + '</div>';
+        html += '<div style="text-align:center"><div style="font-size:10px;color:#8b5cf6;font-weight:600">PERIODE B</div><div style="font-size:18px;font-weight:800">' + (m.isMoney ? formatRp(m.valB) : (m.valB || 0)) + '</div></div>';
+        html += '</div></div>';
+      }
+      html += '</div>';
+
+      html += '<div class="dash-grid mt-4">';
+      var pLabels = ['A','B'];
+      for (var ti = 0; ti < pLabels.length; ti++) {
+        var tp = pLabels[ti];
+        var pd = ti === 0 ? data.period_a : data.period_b;
+        var tcolor = ti === 0 ? '#3b82f6' : '#8b5cf6';
+        html += '<div class="card"><div class="card-header"><h3 style="color:' + tcolor + '">\uD83C\uDFC6 Top Produk Periode ' + tp + '</h3></div>';
+        if (pd.top_products && pd.top_products.length > 0) {
+          html += '<div class="overflow-x"><table><thead><tr><th>#</th><th>Produk</th><th>Qty</th><th>Revenue</th></tr></thead><tbody>';
+          for (var tpi = 0; tpi < pd.top_products.length; tpi++) {
+            var tpr = pd.top_products[tpi];
+            html += '<tr><td>' + (tpi+1) + '</td><td><strong>' + escHtml(tpr.product_name) + '</strong></td><td>' + (tpr.total_qty||0) + '</td><td>' + formatRp(tpr.total_revenue) + '</td></tr>';
+          }
+          html += '</tbody></table></div>';
+        } else { html += emptyHtml('\uD83C\uDFC6', 'Tidak ada data'); }
+        html += '</div>';
+      }
+      html += '</div>';
+
+      html += '<div class="dash-grid mt-4">';
+      for (var pyi = 0; pyi < pLabels.length; pyi++) {
+        var pyp = pLabels[pyi];
+        var pyd = pyi === 0 ? data.period_a : data.period_b;
+        var pycolor = pyi === 0 ? '#3b82f6' : '#8b5cf6';
+        html += '<div class="card"><div class="card-header"><h3 style="color:' + pycolor + '">\uD83D\uDCB3 Metode Bayar Periode ' + pyp + '</h3></div>';
+        if (pyd.by_payment && pyd.by_payment.length > 0) {
+          html += '<div class="overflow-x"><table><thead><tr><th>Metode</th><th>Jumlah</th><th>Total</th></tr></thead><tbody>';
+          for (var pmi = 0; pmi < pyd.by_payment.length; pmi++) {
+            var pm = pyd.by_payment[pmi];
+            html += '<tr><td>' + payMethodBadge(pm.payment_method) + '</td><td>' + (pm.count||0) + '</td><td>' + formatRp(pm.total) + '</td></tr>';
+          }
+          html += '</tbody></table></div>';
+        } else { html += emptyHtml('\uD83D\uDCB3', 'Tidak ada data'); }
+        html += '</div>';
+      }
+      html += '</div>';
+
+    } catch (err) {
+      html += '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+    }
+  } else {
+    html += '<div class="card" style="text-align:center;padding:40px">' + emptyHtml('\u2696\uFE0F', 'Pilih kedua periode untuk memulai perbandingan') + '</div>';
+  }
+
+  main.innerHTML = html;
+}
+
+// ============ PRODUK SLOW MOVING ============
+var slowMovingDays = 30;
+
+async function renderSlowMoving() {
+  var main = document.getElementById('mainContent');
+  var html = '<div class="page-header"><h1>\uD83D\uDC0C Produk Slow Moving</h1><p>Analisis produk yang jarang laku untuk optimasi stok</p></div>';
+
+  html += '<div class="toolbar"><div class="category-pills">';
+  var dayOpts = [7, 14, 30, 60, 90];
+  for (var di = 0; di < dayOpts.length; di++) {
+    var dd = dayOpts[di];
+    html += '<div class="category-pill' + (slowMovingDays === dd ? ' active' : '') + '" onclick="changeSlowDays(' + dd + ')">' + dd + ' Hari</div>';
+  }
+  html += '</div></div>';
+
+  try {
+    var data = await apiFetch('/api/reports/slow-moving?days=' + slowMovingDays);
+    var s = data.summary || {};
+    var products = data.products || [];
+
+    html += '<div class="stat-grid">';
+    html += '<div class="stat-card stat-red"><div class="stat-icon">\uD83D\uDEAB</div><div class="stat-value">' + (s.zero_sales || 0) + '</div><div class="stat-label">Tidak Terjual</div></div>';
+    html += '<div class="stat-card stat-orange"><div class="stat-icon">\uD83D\uDC0C</div><div class="stat-value">' + (s.slow_products || 0) + '</div><div class="stat-label">Slow Moving (1-5 pcs)</div></div>';
+    html += '<div class="stat-card stat-blue"><div class="stat-icon">\uD83D\uDCE6</div><div class="stat-value">' + (s.total_products || 0) + '</div><div class="stat-label">Total Produk</div></div>';
+    html += '<div class="stat-card stat-purple"><div class="stat-icon">\uD83D\uDCB0</div><div class="stat-value">' + formatRp(s.total_capital_tied || 0) + '</div><div class="stat-label">Modal Tertahan</div></div>';
+    html += '</div>';
+
+    var zeroProducts = products.filter(function(p) { return Number(p.total_sold) === 0; });
+    if (zeroProducts.length > 0) {
+      html += '<div class="card mt-4" style="border-left:4px solid #ef4444"><div class="card-header"><h3>\uD83D\uDEAB Tidak Terjual Sama Sekali (' + zeroProducts.length + ' produk)</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok</th><th>Harga Jual</th><th>Modal/pcs</th><th>Modal Tertahan</th></tr></thead><tbody>';
+      for (var zi = 0; zi < zeroProducts.length; zi++) {
+        var zp = zeroProducts[zi];
+        html += '<tr><td><strong>' + escHtml(zp.name) + '</strong></td><td>' + escHtml(zp.category_name) + '</td><td>' + (zp.stock||0) + ' ' + escHtml(zp.unit||'pcs') + '</td><td>' + formatRp(zp.price) + '</td><td>' + formatRp(zp.cost_price) + '</td><td style="color:#ef4444;font-weight:700">' + formatRp(zp.capital_tied) + '</td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    var slowProds = products.filter(function(p) { return Number(p.total_sold) > 0 && Number(p.total_sold) <= 5; });
+    if (slowProds.length > 0) {
+      html += '<div class="card mt-4" style="border-left:4px solid #f59e0b"><div class="card-header"><h3>\uD83D\uDC0C Slow Moving (' + slowProds.length + ' produk)</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Produk</th><th>Kategori</th><th>Terjual</th><th>Rata2/Hari</th><th>Stok</th><th>Perkiraan Habis</th><th>Modal Tertahan</th></tr></thead><tbody>';
+      for (var si = 0; si < slowProds.length; si++) {
+        var sp = slowProds[si];
+        var daysLabel = sp.days_of_stock >= 999 ? '\u221E' : sp.days_of_stock + ' hari';
+        html += '<tr><td><strong>' + escHtml(sp.name) + '</strong></td><td>' + escHtml(sp.category_name) + '</td><td>' + sp.total_sold + ' ' + escHtml(sp.unit||'pcs') + '</td><td>' + sp.avg_daily_sales + '</td><td>' + (sp.stock||0) + '</td><td>' + daysLabel + '</td><td style="color:#f59e0b;font-weight:700">' + formatRp(sp.capital_tied) + '</td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    html += '<div class="card mt-4"><div class="card-header"><h3>\uD83D\uDCCA Semua Produk \u2014 Ranking Penjualan ' + data.days + ' Hari</h3></div>';
+    html += '<div class="overflow-x"><table><thead><tr><th>#</th><th>Produk</th><th>Kategori</th><th>Terjual</th><th>Revenue</th><th>Stok</th><th>Modal Tertahan</th><th>Status</th></tr></thead><tbody>';
+    for (var ai = 0; ai < products.length; ai++) {
+      var ap = products[ai];
+      var sold = Number(ap.total_sold) || 0;
+      var statusBadge = sold === 0 ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Mati</span>'
+        : sold <= 5 ? '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Lambat</span>'
+        : sold <= 20 ? '<span style="background:#dbeafe;color:#2563eb;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Normal</span>'
+        : '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Laris</span>';
+      html += '<tr><td>' + (ai+1) + '</td><td><strong>' + escHtml(ap.name) + '</strong></td><td>' + escHtml(ap.category_name) + '</td><td>' + sold + '</td><td>' + formatRp(ap.total_revenue) + '</td><td>' + (ap.stock||0) + '</td><td>' + formatRp(ap.capital_tied) + '</td><td>' + statusBadge + '</td></tr>';
+    }
+    html += '</tbody></table></div></div>';
+
+  } catch (err) {
+    html += '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+
+  main.innerHTML = html;
+}
+
+function changeSlowDays(d) {
+  slowMovingDays = d;
+  renderSlowMoving();
+}
+
 // ============ LABA RUGI ============
 let plPeriod = 'month';
 let plStartDate = '';
@@ -4581,8 +4856,162 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// ============ OFFLINE MODE ============
+var OFFLINE_DB_NAME = 'KasirProOffline';
+var OFFLINE_DB_VERSION = 1;
+var offlineDb = null;
+
+function openOfflineDb() {
+  return new Promise(function(resolve, reject) {
+    if (offlineDb) { resolve(offlineDb); return; }
+    var req = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains('products')) db.createObjectStore('products', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('categories')) db.createObjectStore('categories', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('priceTiers')) db.createObjectStore('priceTiers', { autoIncrement: true });
+      if (!db.objectStoreNames.contains('discounts')) db.createObjectStore('discounts', { autoIncrement: true });
+      if (!db.objectStoreNames.contains('pendingTx')) db.createObjectStore('pendingTx', { keyPath: 'offline_id' });
+    };
+    req.onsuccess = function(e) { offlineDb = e.target.result; resolve(offlineDb); };
+    req.onerror = function() { reject(new Error('IndexedDB not available')); };
+  });
+}
+
+function idbPut(storeName, data) {
+  return openOfflineDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      if (Array.isArray(data)) { data.forEach(function(d) { store.put(d); }); }
+      else { store.put(data); }
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  });
+}
+
+function idbGetAll(storeName) {
+  return openOfflineDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var req = store.getAll();
+      req.onsuccess = function() { resolve(req.result || []); };
+      req.onerror = function() { reject(req.error); };
+    });
+  });
+}
+
+function idbClear(storeName) {
+  return openOfflineDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).clear();
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  });
+}
+
+function idbDelete(storeName, key) {
+  return openOfflineDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  });
+}
+
+async function cachePOSData() {
+  try {
+    var prodData = await apiFetch('/api/products').catch(function() { return null; });
+    if (prodData) {
+      var prods = prodData.products || prodData || [];
+      await idbClear('products');
+      await idbPut('products', prods);
+    }
+    var catData = await apiFetch('/api/categories').catch(function() { return null; });
+    if (catData) {
+      var cats = catData.categories || catData || [];
+      await idbClear('categories');
+      await idbPut('categories', cats);
+    }
+    var settData = await apiFetch('/api/settings').catch(function() { return null; });
+    if (settData) await idbPut('settings', Object.assign({}, settData, { id: 1 }));
+    var tiersData = await apiFetch('/api/price-tiers').catch(function() { return null; });
+    if (tiersData) { await idbClear('priceTiers'); await idbPut('priceTiers', tiersData); }
+    var discData = await apiFetch('/api/product-discounts/active').catch(function() { return null; });
+    if (discData) { await idbClear('discounts'); await idbPut('discounts', discData); }
+  } catch (e) { console.warn('Cache POS data failed:', e); }
+}
+
+async function getPendingTxCount() {
+  try {
+    var txs = await idbGetAll('pendingTx');
+    return txs.length;
+  } catch (e) { return 0; }
+}
+
+async function addOfflineTx(payload) {
+  payload.offline_id = 'otx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  payload.created_at = new Date().toISOString();
+  await idbPut('pendingTx', [payload]);
+  updatePendingBadge();
+  return { transaction: { id: payload.offline_id }, offline: true };
+}
+
+async function syncPendingTransactions() {
+  if (!navigator.onLine) return;
+  try {
+    var pending = await idbGetAll('pendingTx');
+    if (pending.length === 0) return;
+    var result = await apiFetch('/api/sync/transactions', {
+      method: 'POST',
+      body: JSON.stringify({ transactions: pending })
+    });
+    if (result.results) {
+      for (var ri = 0; ri < result.results.length; ri++) {
+        var r = result.results[ri];
+        if (r.status === 'ok') { await idbDelete('pendingTx', r.offline_id); }
+      }
+    }
+    updatePendingBadge();
+    if (result.synced > 0) showToast('\u2705 ' + result.synced + ' transaksi offline berhasil disync!', 'success');
+  } catch (e) { console.warn('Sync failed:', e); }
+}
+
+function updatePendingBadge() {
+  getPendingTxCount().then(function(count) {
+    var badge = document.getElementById('pendingSyncBadge');
+    if (badge) {
+      badge.textContent = count;
+      badge.style.display = count > 0 ? 'inline' : 'none';
+    }
+  });
+}
+
+var _isOnline = navigator.onLine;
+function updateOnlineStatus() {
+  var online = navigator.onLine;
+  var bar = document.getElementById('offlineBar');
+  if (bar) { bar.classList.toggle('show', !online); }
+  if (online && !_isOnline) {
+    showToast('\uD83C\uDF10 Kembali online! Menyinkronkan...', 'info');
+    syncPendingTransactions();
+    cachePOSData();
+  }
+  _isOnline = online;
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
 // ============ INIT ============
 checkAuth();
+openOfflineDb().then(function() { updatePendingBadge(); updateOnlineStatus(); cachePOSData(); }).catch(function() {});
 </script>
 </body>
 </html>

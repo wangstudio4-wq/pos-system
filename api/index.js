@@ -34,14 +34,6 @@ app.get('/manifest.json', (req, res) => {
   });
 });
 
-app.get('/sw.js', (req, res) => {
-  res.set('Content-Type', 'application/javascript');
-  res.send(`const CACHE_NAME='kasirpro-v1';
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json'])).then(()=>self.skipWaiting()))});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
-self.addEventListener('fetch',e=>{if(e.request.url.includes('/api/')){e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));return}e.respondWith(caches.match(e.request).then(c=>{const f=fetch(e.request).then(r=>{const cl=r.clone();caches.open(CACHE_NAME).then(ca=>ca.put(e.request,cl));return r}).catch(()=>c);return c||f}))});`);
-});
-
 app.get('/icons/:file', (req, res) => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
     <rect width="512" height="512" rx="80" fill="#415D43"/>
@@ -521,6 +513,90 @@ async function runAutoMigrate() {
 const migrationReady = runAutoMigrate().catch(err => console.error('Migration error:', err));
 // Ensure migration completes before handling any request (critical for Vercel serverless)
 app.use(async (req, res, next) => { await migrationReady; next(); });
+
+// ============ SERVICE WORKER ============
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.send(`
+const CACHE_NAME = 'kasirpro-v1';
+const STATIC_ASSETS = ['/'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(STATIC_ASSETS)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))));
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  if (e.request.url.includes('/api/')) return;
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
+      const clone = resp.clone();
+      caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+      return resp;
+    })).catch(() => caches.match('/'))
+  );
+});
+  `);
+});
+
+// ============ OFFLINE SYNC ============
+app.post('/api/sync/transactions', authenticateToken, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { transactions: offlineTxs } = req.body;
+    if (!Array.isArray(offlineTxs) || offlineTxs.length === 0) {
+      return res.json({ synced: 0, results: [] });
+    }
+    const results = [];
+    for (const tx of offlineTxs) {
+      try {
+        await conn.beginTransaction();
+        const [txResult] = await conn.query(
+          `INSERT INTO transactions (user_id, user_name, total, payment_method, customer_name, discount, subtotal, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [req.user.id, req.user.name || req.user.username, tx.total, tx.payment_method,
+           tx.customer_name || 'Umum', tx.discount || 0, tx.subtotal || tx.total, tx.notes || '',
+           tx.created_at || new Date()]
+        );
+        const txId = txResult.insertId;
+        for (const item of (tx.items || [])) {
+          await conn.query(
+            `INSERT INTO transaction_items (transaction_id, product_id, product_name, price, cost_price, qty, subtotal, discount)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [txId, item.id, item.name, item.price, item.cost_price || 0, item.qty,
+             item.price * item.qty - (item.discount || 0), item.discount || 0]
+          );
+          await conn.query('UPDATE products SET stock = stock - ? WHERE id = ?', [item.qty, item.id]);
+        }
+        if (tx.payment_method === 'Hutang' && tx.customer_name) {
+          await conn.query(
+            `INSERT INTO debts (customer_name, customer_phone, transaction_id, total_amount, remaining_amount, status)
+             VALUES (?, ?, ?, ?, ?, 'unpaid')`,
+            [tx.customer_name, tx.customer_phone || null, txId, tx.total, tx.total]
+          );
+        }
+        await conn.commit();
+        results.push({ offline_id: tx.offline_id, server_id: txId, status: 'ok' });
+      } catch (itemErr) {
+        await conn.rollback();
+        results.push({ offline_id: tx.offline_id, status: 'error', error: itemErr.message });
+      }
+    }
+    res.json({ synced: results.filter(r => r.status === 'ok').length, results });
+  } catch (err) {
+    console.error('Sync error:', err);
+    res.status(500).json({ error: 'Sync gagal' });
+  } finally {
+    conn.release();
+  }
+});
 
 app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (req, res) => {
   const results = [];
@@ -1433,6 +1509,119 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
   } catch (err) {
     console.error('Sales report error:', err);
     res.status(500).json({ error: 'Gagal mengambil laporan.' });
+  }
+});
+
+// ============ PERIOD COMPARISON ============
+app.get('/api/reports/comparison', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { start_a, end_a, start_b, end_b } = req.query;
+    if (!start_a || !end_a || !start_b || !end_b) {
+      return res.status(400).json({ error: 'Semua tanggal harus diisi' });
+    }
+
+    async function getPeriodData(start, end) {
+      const params = [start + ' 00:00:00', end + ' 23:59:59'];
+      const dateFilter = 'WHERE created_at >= ? AND created_at <= ?';
+      const tDateFilter = 'WHERE t.created_at >= ? AND t.created_at <= ?';
+
+      const [summary] = await pool.query(
+        `SELECT COUNT(*) as total_transactions, COALESCE(SUM(total), 0) as total_revenue,
+         COALESCE(AVG(total), 0) as avg_transaction, COALESCE(SUM(discount), 0) as total_discount
+         FROM transactions ${dateFilter}`, params
+      );
+
+      const [topProducts] = await pool.query(
+        `SELECT ti.product_name, SUM(ti.qty) as total_qty, COALESCE(SUM(ti.subtotal), 0) as total_revenue
+         FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id
+         ${tDateFilter} GROUP BY ti.product_name ORDER BY total_revenue DESC LIMIT 10`, params
+      );
+
+      const [byPayment] = await pool.query(
+        `SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total), 0) as total
+         FROM transactions ${dateFilter} GROUP BY payment_method ORDER BY total DESC`, params
+      );
+
+      const [byCategory] = await pool.query(
+        `SELECT COALESCE(c.name, 'Tanpa Kategori') as category_name,
+                SUM(ti.qty) as total_qty, COALESCE(SUM(ti.subtotal), 0) as total_revenue
+         FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id
+         LEFT JOIN products p ON ti.product_id = p.id LEFT JOIN categories c ON p.category_id = c.id
+         ${tDateFilter} GROUP BY c.id, c.name ORDER BY total_revenue DESC`, params
+      );
+
+      return {
+        summary: summary[0],
+        top_products: topProducts,
+        by_payment: byPayment,
+        by_category: byCategory
+      };
+    }
+
+    const [periodA, periodB] = await Promise.all([
+      getPeriodData(start_a, end_a),
+      getPeriodData(start_b, end_b)
+    ]);
+
+    res.json({ period_a: periodA, period_b: periodB });
+  } catch (err) {
+    console.error('Comparison report error:', err);
+    res.status(500).json({ error: 'Gagal mengambil data perbandingan.' });
+  }
+});
+
+// ============ SLOW MOVING PRODUCTS ============
+app.get('/api/reports/slow-moving', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoff = cutoffDate.toISOString().slice(0, 10) + ' 00:00:00';
+
+    const [withSales] = await pool.query(
+      `SELECT p.id, p.name, p.stock, p.price, p.cost_price, p.unit,
+              COALESCE(c.name, 'Tanpa Kategori') as category_name,
+              COALESCE(SUM(ti.qty), 0) as total_sold,
+              COALESCE(SUM(ti.subtotal), 0) as total_revenue,
+              MAX(t.created_at) as last_sold_at
+       FROM products p
+       LEFT JOIN transaction_items ti ON ti.product_id = p.id
+       LEFT JOIN transactions t ON ti.transaction_id = t.id AND t.created_at >= ?
+       LEFT JOIN categories c ON p.category_id = c.id
+       GROUP BY p.id
+       ORDER BY total_sold ASC, p.stock DESC`,
+      [cutoff]
+    );
+
+    const products = withSales.map(p => {
+      const capitalTied = (Number(p.stock) || 0) * (Number(p.cost_price) || 0);
+      const avgDailySales = (Number(p.total_sold) || 0) / days;
+      const daysOfStock = avgDailySales > 0 ? Math.round(Number(p.stock) / avgDailySales) : 999;
+      return {
+        ...p,
+        capital_tied: capitalTied,
+        avg_daily_sales: Math.round(avgDailySales * 100) / 100,
+        days_of_stock: daysOfStock
+      };
+    });
+
+    const totalCapitalTied = products.reduce((s, p) => s + p.capital_tied, 0);
+    const zeroSales = products.filter(p => Number(p.total_sold) === 0).length;
+    const slowProducts = products.filter(p => Number(p.total_sold) > 0 && Number(p.total_sold) <= 5).length;
+
+    res.json({
+      days,
+      summary: {
+        total_products: products.length,
+        zero_sales: zeroSales,
+        slow_products: slowProducts,
+        total_capital_tied: totalCapitalTied
+      },
+      products
+    });
+  } catch (err) {
+    console.error('Slow moving report error:', err);
+    res.status(500).json({ error: 'Gagal mengambil data produk slow moving.' });
   }
 });
 
