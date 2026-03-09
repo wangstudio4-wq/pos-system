@@ -505,6 +505,17 @@ async function runAutoMigrate() {
     notes TEXT DEFAULT NULL,
     user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create product_discounts', `CREATE TABLE IF NOT EXISTS product_discounts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    discount_type ENUM('percentage','fixed') NOT NULL DEFAULT 'percentage',
+    discount_value DECIMAL(15,2) NOT NULL,
+    min_qty INT DEFAULT 1,
+    start_date DATE DEFAULT NULL,
+    end_date DATE DEFAULT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   console.log('✅ Auto-migrate completed');
 }
 const migrationReady = runAutoMigrate().catch(err => console.error('Migration error:', err));
@@ -652,6 +663,17 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
     payment_method VARCHAR(20) DEFAULT 'Cash',
     notes TEXT DEFAULT NULL,
     user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create product_discounts', `CREATE TABLE IF NOT EXISTS product_discounts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    discount_type ENUM('percentage','fixed') NOT NULL DEFAULT 'percentage',
+    discount_value DECIMAL(15,2) NOT NULL,
+    min_qty INT DEFAULT 1,
+    start_date DATE DEFAULT NULL,
+    end_date DATE DEFAULT NULL,
+    is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   res.json({ results });
 });
@@ -901,6 +923,65 @@ app.post('/api/products/:id/price-tiers', authenticateToken, authorizeRole('admi
   } finally {
     conn.release();
   }
+});
+
+// ============ PRODUCT DISCOUNTS ============
+
+app.get('/api/product-discounts', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT pd.*, p.name as product_name 
+       FROM product_discounts pd 
+       LEFT JOIN products p ON pd.product_id = p.id 
+       ORDER BY pd.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/product-discounts/active', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT pd.*, p.name as product_name 
+       FROM product_discounts pd 
+       LEFT JOIN products p ON pd.product_id = p.id 
+       WHERE pd.is_active = 1 
+       AND (pd.start_date IS NULL OR pd.start_date <= CURDATE()) 
+       AND (pd.end_date IS NULL OR pd.end_date >= CURDATE())
+       ORDER BY pd.product_id, pd.min_qty DESC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/product-discounts', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    const { product_id, name, discount_type, discount_value, min_qty, start_date, end_date } = req.body;
+    if (!product_id || !name || !discount_value) return res.status(400).json({ error: 'Data diskon tidak lengkap' });
+    const [result] = await pool.query(
+      'INSERT INTO product_discounts (product_id, name, discount_type, discount_value, min_qty, start_date, end_date) VALUES (?,?,?,?,?,?,?)',
+      [product_id, name, discount_type || 'percentage', discount_value, min_qty || 1, start_date || null, end_date || null]
+    );
+    res.json({ id: result.insertId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/product-discounts/:id', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    const { name, discount_type, discount_value, min_qty, start_date, end_date, is_active } = req.body;
+    await pool.query(
+      'UPDATE product_discounts SET name=?, discount_type=?, discount_value=?, min_qty=?, start_date=?, end_date=?, is_active=? WHERE id=?',
+      [name, discount_type, discount_value, min_qty || 1, start_date || null, end_date || null, is_active !== undefined ? is_active : 1, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/product-discounts/:id', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM product_discounts WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ============ KASBON (HUTANG) ============

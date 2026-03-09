@@ -1781,6 +1781,8 @@ async function renderPOS() {
       apiFetch('/api/price-tiers').catch(() => [])
     ]);
     window._priceTiers = tiersData || [];
+    const discountData = await apiFetch('/api/product-discounts/active');
+    window._activeDiscounts = discountData;
     appSettings = settingsData || {};
     posProducts = prodData.products || prodData || [];
     posCategories = catData.categories || catData || [];
@@ -1844,12 +1846,20 @@ function renderProductGrid() {
     const catColor = p.category_color || '#6b7280';
     const lowStk = (!oos && p.min_stock && p.stock <= p.min_stock);
     const hasTiers = (window._priceTiers || []).some(t => t.product_id === p.id);
+    const hasDiscount = (window._activeDiscounts || []).some(d => d.product_id === p.id);
     return '<div class="product-card' + (oos ? ' out-of-stock' : '') + '" style="' + (lowStk ? 'border: 2px solid #f59e0b;' : '') + 'position:relative" onclick="addToCart(' + p.id + ')">' +
-      (hasTiers ? '<span style="position:absolute;top:4px;left:4px;background:#8b5cf6;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">GROSIR</span>' : '') +
+      (hasDiscount ? '<span style="position:absolute;top:4px;left:4px;background:#ef4444;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">🏷️PROMO</span>' : (hasTiers ? '<span style="position:absolute;top:4px;left:4px;background:#8b5cf6;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">GROSIR</span>' : '')) +
       (lowStk ? '<span class="stock-warning-badge" title="Stok menipis!">⚠️</span>' : '') +
       '<div class="p-name">' + escHtml(p.name) + '</div>' +
       (p.barcode ? '<div class="p-barcode">' + escHtml(p.barcode) + '</div>' : '') +
-      '<div class="p-price">' + formatRp(p.price) + '<span style="font-size:10px;color:#64748b">/' + escHtml(p.unit || 'pcs') + '</span></div>' +
+      (function() {
+        const disc = (window._activeDiscounts || []).find(d => d.product_id === p.id && d.min_qty <= 1);
+        if (disc) {
+          const discPrice = disc.discount_type === 'percentage' ? Math.round(p.price * (1 - disc.discount_value/100)) : Math.max(p.price - disc.discount_value, 0);
+          return '<div class="p-price"><span style="text-decoration:line-through;color:#94a3b8;font-size:11px">' + formatRp(p.price) + '</span> ' + formatRp(discPrice) + '<span style="font-size:10px;color:#64748b">/' + escHtml(p.unit || 'pcs') + '</span></div>';
+        }
+        return '<div class="p-price">' + formatRp(p.price) + '<span style="font-size:10px;color:#64748b">/' + escHtml(p.unit || 'pcs') + '</span></div>';
+      }()) +
       '<div class="p-meta">' +
         '<span class="p-stock"' + (lowStk ? ' style="color:#f59e0b;font-weight:700"' : '') + '>' + (oos ? '❌ Habis' : (lowStk ? '⚠️ ' + p.stock + ' ' + escHtml(p.unit||'pcs') : '📦 ' + p.stock + ' ' + escHtml(p.unit||'pcs'))) + '</span>' +
         (p.category_name ? '<span class="category-badge" style="background:' + escHtml(catColor) + '">' + escHtml(p.category_name) + '</span>' : '') +
@@ -2019,8 +2029,10 @@ function addToCart(productId) {
     }
     existing.qty++;
     applyTieredPrice(cart.indexOf(existing));
+    applyProductDiscount(cart.indexOf(existing));
   } else {
-    cart.push({ id: p.id, name: p.name, price: Number(p.price), cost_price: Number(p.cost_price || 0), qty: 1, discount: 0, unit: p.unit || 'pcs' });
+    cart.push({ id: p.id, name: p.name, price: Number(p.price), cost_price: Number(p.cost_price || 0), qty: 1, discount: 0, autoDiscount: 0, unit: p.unit || 'pcs' });
+    applyProductDiscount(cart.length - 1);
   }
   updateCartUI();
 }
@@ -2039,8 +2051,9 @@ function changeQty(idx, delta) {
       cart[idx].qty = p.stock;
       showToast('Stok tidak mencukupi', 'warning');
     }
-    // Auto-apply tiered pricing
+    // Auto-apply tiered pricing & discounts
     applyTieredPrice(idx);
+    applyProductDiscount(idx);
   }
   updateCartUI();
 }
@@ -2059,6 +2072,34 @@ function applyTieredPrice(idx) {
   if (appliedPrice !== item.price) {
     item.price = appliedPrice;
     if (appliedPrice < basePrice) showToast('Harga grosir diterapkan! ' + formatRp(appliedPrice), 'info');
+  }
+}
+
+function applyProductDiscount(idx) {
+  const item = cart[idx];
+  if (!item) return;
+  const discounts = (window._activeDiscounts || []).filter(d => d.product_id === item.id).sort((a,b) => b.min_qty - a.min_qty);
+  if (discounts.length === 0) { item.autoDiscount = 0; return; }
+  // Find the best matching discount for current qty
+  let bestDisc = null;
+  for (const d of discounts) {
+    if (item.qty >= d.min_qty) { bestDisc = d; break; }
+  }
+  if (!bestDisc) { item.autoDiscount = 0; return; }
+  const p = posProducts.find(x => x.id === item.id);
+  const basePrice = p ? Number(p.price) : item.price;
+  const itemSubtotal = item.price * item.qty;
+  let discAmount = 0;
+  if (bestDisc.discount_type === 'percentage') {
+    discAmount = Math.round(itemSubtotal * bestDisc.discount_value / 100);
+  } else {
+    discAmount = Math.round(bestDisc.discount_value * item.qty);
+  }
+  item.autoDiscount = discAmount;
+  item.autoDiscountName = bestDisc.name;
+  if (discAmount > 0 && item._lastDiscNotify !== item.qty) {
+    showToast('🏷️ ' + bestDisc.name + ': -' + formatRp(discAmount), 'info');
+    item._lastDiscNotify = item.qty;
   }
 }
 
@@ -2081,7 +2122,7 @@ function calcTaxService(subtotal, totalDiscount) {
 }
 
 function renderCartPanel() {
-  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
+  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount - (c.autoDiscount || 0)), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
   const { afterDiscount, taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
@@ -2101,11 +2142,12 @@ function renderCartPanel() {
     html += '<div class="cart-empty"><div class="empty-icon">🛒</div><p>Keranjang kosong</p><p style="font-size:12px;margin-top:4px">Klik produk untuk menambahkan</p></div>';
   } else {
     cart.forEach((c, i) => {
-      const itemTotal = c.price * c.qty - c.discount;
+      const itemTotal = c.price * c.qty - c.discount - (c.autoDiscount || 0);
       html += '<div class="cart-item">' +
         '<div class="cart-item-info">' +
           '<div class="cart-item-name">' + escHtml(c.name) + '</div>' +
           '<div class="cart-item-price">' + formatRp(c.price) + '/' + escHtml(c.unit || 'pcs') + ' x ' + c.qty + (function(){ const p = posProducts.find(x=>x.id===c.id); const base = p ? Number(p.price) : c.price; return c.price < base ? ' <span style="color:#8b5cf6;font-size:10px">🏷️GROSIR</span>' : ''; }()) + '</div>' +
+          ((c.autoDiscount > 0) ? '<div style="color:#ef4444;font-size:11px;margin-top:2px">🏷️ ' + escHtml(c.autoDiscountName || 'Promo') + ': -' + formatRp(c.autoDiscount) + '</div>' : '') +
           '<div class="cart-item-disc">Disc: <input type="number" min="0" value="' + c.discount + '" onchange="updateItemDiscount(' + i + ',this.value)" placeholder="0"></div>' +
         '</div>' +
         '<div class="qty-control">' +
@@ -2181,7 +2223,7 @@ function loadKasbonCustomers() {
 }
 
 function calcChange() {
-  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
+  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount - (c.autoDiscount || 0)), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
   const { grandTotal } = calcTaxService(subtotal, totalDiscount);
@@ -2202,7 +2244,7 @@ async function processPayment() {
     navigateTo('shifts');
     return;
   }
-  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
+  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount - (c.autoDiscount || 0)), 0);
   const discountEl = document.getElementById('cartDiscount');
   const totalDiscount = discountEl ? (Number(discountEl.value)||0) : 0;
   const { taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
@@ -2233,7 +2275,7 @@ async function processPayment() {
   const notes = notesEl ? notesEl.value : '';
 
   const payload = {
-    items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, cost_price: c.cost_price || 0, qty: c.qty, discount: c.discount })),
+    items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, cost_price: c.cost_price || 0, qty: c.qty, discount: (c.discount || 0) + (c.autoDiscount || 0) })),
     subtotal: subtotal,
     discount: totalDiscount,
     total: grandTotal,
@@ -2357,7 +2399,7 @@ function holdOrder() {
   const totalDiscount = discountEl ? (Number(discountEl.value) || 0) : 0;
   const notes = notesEl ? notesEl.value : '';
 
-  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
+  const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount - (c.autoDiscount || 0)), 0);
   const { grandTotal } = calcTaxService(subtotal, totalDiscount);
 
   const orderNum = heldOrders.length + 1;
@@ -2528,6 +2570,18 @@ function showProductModal(product) {
     html += '<option value="' + c.id + '"' + (product?.category_id === c.id ? ' selected' : '') + '>' + escHtml(c.name) + '</option>';
   });
   html += '</select></div>';
+  // Diskon / Promo section
+  html += '<div style="border-top:1px solid #e2e8f0;margin:12px 0;padding-top:12px"><strong>🏷️ Diskon / Promo</strong> <span style="color:#64748b;font-size:12px">(opsional)</span></div>';
+  html += '<div id="discountRows">';
+  if (isEdit && product.id) {
+    html += '<div style="text-align:center;padding:8px;color:#64748b;font-size:12px">Memuat diskon...</div>';
+  } else {
+    html += '<div style="color:#64748b;font-size:12px;padding:4px 0">Simpan produk dulu, lalu edit untuk atur diskon.</div>';
+  }
+  html += '</div>';
+  if (isEdit && product.id) {
+    html += '<button type="button" class="btn btn-sm" style="margin-top:6px;font-size:12px;background:#ef4444;color:#fff" onclick="addDiscountRow()">+ Tambah Diskon</button>';
+  }
   html += '<div style="border-top:1px solid #e2e8f0;margin:12px 0;padding-top:12px"><strong>🏷️ Harga Grosir</strong> <span style="color:#64748b;font-size:12px">(opsional)</span></div>';
   html += '<div id="tierRows">';
   if (isEdit && product.id) {
@@ -2542,7 +2596,7 @@ function showProductModal(product) {
   html += '</form></div>';
   html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveProduct(' + (isEdit ? product.id : 'null') + ')">Simpan</button></div>';
   openModal(html);
-  if (isEdit && product.id) { setTimeout(() => loadTierRows(product.id), 100); }
+  if (isEdit && product.id) { setTimeout(() => { loadTierRows(product.id); loadDiscountRows(product.id); }, 100); }
 }
 
 async function saveProduct(id) {
@@ -2563,10 +2617,11 @@ async function saveProduct(id) {
     if (id) {
       await apiFetch('/api/products/' + id, { method: 'PUT', body: JSON.stringify(payload) });
       await saveTiers(id);
+      await saveDiscounts(id);
       showToast('Produk berhasil diperbarui');
     } else {
       const newProd = await apiFetch('/api/products', { method: 'POST', body: JSON.stringify(payload) });
-      if (newProd.product && newProd.product.id) await saveTiers(newProd.product.id);
+      if (newProd.product && newProd.product.id) { await saveTiers(newProd.product.id); await saveDiscounts(newProd.product.id); }
       showToast('Produk berhasil ditambahkan');
     }
     closeModal();
@@ -2620,6 +2675,73 @@ async function saveTiers(productId) {
   try {
     await apiFetch('/api/products/' + productId + '/price-tiers', { method: 'POST', body: JSON.stringify({ tiers }) });
   } catch (e) { console.log('Save tiers error:', e); }
+}
+
+function loadDiscountRows(productId) {
+  apiFetch('/api/product-discounts').then(discounts => {
+    const rows = discounts.filter(d => d.product_id === productId);
+    const container = document.getElementById('discountRows');
+    if (!container) return;
+    container.innerHTML = '';
+    if (rows.length === 0) {
+      container.innerHTML = '<div style="color:#64748b;font-size:12px;padding:4px 0">Belum ada diskon aktif</div>';
+    } else {
+      rows.forEach(d => addDiscountRow(d));
+    }
+  }).catch(() => {});
+}
+
+function addDiscountRow(disc) {
+  const container = document.getElementById('discountRows');
+  if (!container) return;
+  const placeholder = container.querySelector('div[style*="color:#64748b"]');
+  if (placeholder) placeholder.remove();
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:center;flex-wrap:wrap;background:#fef2f2;padding:8px;border-radius:8px;border:1px solid #fecaca';
+  row.dataset.discountId = disc ? disc.id : '';
+  row.innerHTML = 
+    '<div style="flex:1;min-width:100px"><input type="text" class="disc-name" value="' + escHtml(disc?.name || '') + '" placeholder="Nama promo" style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"></div>' +
+    '<div style="width:80px"><select class="disc-type" style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">' +
+      '<option value="percentage"' + ((!disc || disc.discount_type === 'percentage') ? ' selected' : '') + '>%</option>' +
+      '<option value="fixed"' + (disc?.discount_type === 'fixed' ? ' selected' : '') + '>Rp</option>' +
+    '</select></div>' +
+    '<div style="width:70px"><input type="number" class="disc-value" min="0" step="0.01" value="' + (disc?.discount_value || '') + '" placeholder="Nilai" style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"></div>' +
+    '<div style="width:60px"><input type="number" class="disc-min-qty" min="1" value="' + (disc?.min_qty || 1) + '" placeholder="Min" title="Min qty" style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"></div>' +
+    '<div style="width:110px"><input type="date" class="disc-start" value="' + (disc?.start_date ? disc.start_date.substring(0,10) : '') + '" title="Mulai" style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:6px;font-size:11px"></div>' +
+    '<div style="width:110px"><input type="date" class="disc-end" value="' + (disc?.end_date ? disc.end_date.substring(0,10) : '') + '" title="Berakhir" style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:6px;font-size:11px"></div>' +
+    '<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;padding:2px" title="Hapus">✕</button>';
+  container.appendChild(row);
+}
+
+async function saveDiscounts(productId) {
+  const container = document.getElementById('discountRows');
+  if (!container) return;
+  // First, delete all existing discounts for this product
+  try {
+    const existing = await apiFetch('/api/product-discounts');
+    const toDelete = existing.filter(d => d.product_id === productId);
+    for (const d of toDelete) {
+      await apiFetch('/api/product-discounts/' + d.id, { method: 'DELETE' });
+    }
+  } catch (e) {}
+  // Then create new ones
+  const rows = container.querySelectorAll('div[style*="flex"]');
+  for (const row of rows) {
+    const name = row.querySelector('.disc-name')?.value;
+    const type = row.querySelector('.disc-type')?.value;
+    const value = Number(row.querySelector('.disc-value')?.value) || 0;
+    const minQty = Number(row.querySelector('.disc-min-qty')?.value) || 1;
+    const startDate = row.querySelector('.disc-start')?.value || null;
+    const endDate = row.querySelector('.disc-end')?.value || null;
+    if (name && value > 0) {
+      try {
+        await apiFetch('/api/product-discounts', { method: 'POST', body: JSON.stringify({
+          product_id: productId, name, discount_type: type, discount_value: value,
+          min_qty: minQty, start_date: startDate, end_date: endDate
+        })});
+      } catch (e) {}
+    }
+  }
 }
 
 async function deleteProduct(id) {
