@@ -585,6 +585,37 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
     product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
     system_stock INT DEFAULT 0, actual_stock INT DEFAULT 0,
     difference INT DEFAULT 0, notes TEXT DEFAULT NULL)`);
+  // Fase 2B: Multi-satuan
+  await safeExec('products.unit', `ALTER TABLE products ADD COLUMN unit VARCHAR(20) DEFAULT 'pcs'`);
+  await safeExec('products.purchase_unit', `ALTER TABLE products ADD COLUMN purchase_unit VARCHAR(20) DEFAULT NULL`);
+  await safeExec('products.conversion_ratio', `ALTER TABLE products ADD COLUMN conversion_ratio DECIMAL(10,4) DEFAULT 1`);
+  // Fase 2B: Harga Grosir
+  await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
+    id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
+    min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
+    UNIQUE KEY unique_tier (product_id, min_qty))`);
+  // Fase 2B: Kasbon
+  await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_phone VARCHAR(20) DEFAULT NULL,
+    transaction_id INT DEFAULT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    paid DECIMAL(15,2) DEFAULT 0,
+    remaining DECIMAL(15,2) NOT NULL,
+    status ENUM('unpaid','partial','paid') DEFAULT 'unpaid',
+    notes TEXT DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Create debt_payments', `CREATE TABLE IF NOT EXISTS debt_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    debt_id INT NOT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    payment_method VARCHAR(20) DEFAULT 'Cash',
+    notes TEXT DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   res.json({ results });
 });
 
@@ -718,20 +749,20 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 // POST new product
 app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, cost_price, stock, category_id, min_stock } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({ error: 'Nama dan harga produk wajib diisi.' });
     }
 
     const [result] = await pool.query(
-      'INSERT INTO products (barcode, name, price, cost_price, stock, category_id, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [barcode || null, name, price, cost_price || 0, stock || 0, category_id || null, min_stock || 5]
+      'INSERT INTO products (barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [barcode || null, name, price, cost_price || 0, stock || 0, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1]
     );
 
     res.status(201).json({
       message: 'Produk berhasil ditambahkan!',
-      product: { id: result.insertId, barcode, name, price, cost_price: cost_price || 0, stock: stock || 0 }
+      product: { id: result.insertId, barcode, name, price, cost_price: cost_price || 0, stock: stock || 0, unit: unit || 'pcs', purchase_unit, conversion_ratio: conversion_ratio || 1 }
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -745,10 +776,10 @@ app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), as
 // PUT update product
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, cost_price, stock, category_id, min_stock } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio } = req.body;
     await pool.query(
-      'UPDATE products SET barcode = ?, name = ?, price = ?, cost_price = ?, stock = ?, category_id = ?, min_stock = ? WHERE id = ?',
-      [barcode || null, name, price, cost_price || 0, stock, category_id || null, min_stock || 5, req.params.id]
+      'UPDATE products SET barcode = ?, name = ?, price = ?, cost_price = ?, stock = ?, category_id = ?, min_stock = ?, unit = ?, purchase_unit = ?, conversion_ratio = ? WHERE id = ?',
+      [barcode || null, name, price, cost_price || 0, stock, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1, req.params.id]
     );
     res.json({ message: 'Produk berhasil diupdate!' });
   } catch (err) {
@@ -787,6 +818,148 @@ app.get('/api/products/barcode/:barcode', authenticateToken, async (req, res) =>
 });
 
 // ============ TRANSACTION ROUTES ============
+
+// ============ PRICE TIERS (HARGA GROSIR) ============
+
+// GET price tiers for a product
+app.get('/api/products/:id/price-tiers', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM price_tiers WHERE product_id = ? ORDER BY min_qty ASC', [req.params.id]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all price tiers (for POS - bulk load)
+app.get('/api/price-tiers', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM price_tiers ORDER BY product_id, min_qty ASC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST save price tiers for a product (replace all)
+app.post('/api/products/:id/price-tiers', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { tiers } = req.body; // Array of { min_qty, price }
+    await conn.query('DELETE FROM price_tiers WHERE product_id = ?', [req.params.id]);
+    if (tiers && tiers.length > 0) {
+      for (const t of tiers) {
+        if (t.min_qty > 0 && t.price > 0) {
+          await conn.query('INSERT INTO price_tiers (product_id, min_qty, price) VALUES (?, ?, ?)', [req.params.id, t.min_qty, t.price]);
+        }
+      }
+    }
+    await conn.commit();
+    const [rows] = await pool.query('SELECT * FROM price_tiers WHERE product_id = ? ORDER BY min_qty ASC', [req.params.id]);
+    res.json({ message: 'Harga grosir berhasil disimpan!', tiers: rows });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// ============ KASBON (HUTANG) ============
+
+// GET all debts (with filters)
+app.get('/api/debts', authenticateToken, async (req, res) => {
+  try {
+    const { status, customer_name } = req.query;
+    let query = 'SELECT * FROM debts';
+    let conditions = [];
+    let params = [];
+    if (status && status !== 'all') { conditions.push('status = ?'); params.push(status); }
+    if (customer_name) { conditions.push('customer_name LIKE ?'); params.push('%' + customer_name + '%'); }
+    if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY created_at DESC';
+    const [rows] = await pool.query(query, params);
+    
+    // Also get summary
+    const [summary] = await pool.query(`SELECT 
+      COUNT(*) as total_debts,
+      COALESCE(SUM(amount), 0) as total_amount,
+      COALESCE(SUM(paid), 0) as total_paid,
+      COALESCE(SUM(remaining), 0) as total_remaining,
+      COUNT(CASE WHEN status = 'unpaid' THEN 1 END) as unpaid_count,
+      COUNT(CASE WHEN status = 'partial' THEN 1 END) as partial_count,
+      COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count
+      FROM debts`);
+    
+    res.json({ debts: rows, summary: summary[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET debt detail with payments
+app.get('/api/debts/:id', authenticateToken, async (req, res) => {
+  try {
+    const [debt] = await pool.query('SELECT * FROM debts WHERE id = ?', [req.params.id]);
+    if (debt.length === 0) return res.status(404).json({ error: 'Kasbon tidak ditemukan.' });
+    const [payments] = await pool.query('SELECT * FROM debt_payments WHERE debt_id = ? ORDER BY created_at DESC', [req.params.id]);
+    // Get transaction items if linked
+    let items = [];
+    if (debt[0].transaction_id) {
+      const [txItems] = await pool.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [debt[0].transaction_id]);
+      items = txItems;
+    }
+    res.json({ debt: debt[0], payments, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST pay debt
+app.post('/api/debts/:id/pay', authenticateToken, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { amount, payment_method, notes } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Jumlah bayar harus lebih dari 0.' });
+    
+    const [debt] = await conn.query('SELECT * FROM debts WHERE id = ?', [req.params.id]);
+    if (debt.length === 0) return res.status(404).json({ error: 'Kasbon tidak ditemukan.' });
+    if (debt[0].status === 'paid') return res.status(400).json({ error: 'Kasbon sudah lunas.' });
+    
+    const payAmount = Math.min(amount, debt[0].remaining);
+    const newPaid = Number(debt[0].paid) + payAmount;
+    const newRemaining = Number(debt[0].amount) - newPaid;
+    const newStatus = newRemaining <= 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
+    
+    await conn.query('INSERT INTO debt_payments (debt_id, amount, payment_method, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, payAmount, payment_method || 'Cash', notes || null, req.user.id, req.user.name || req.user.username]);
+    
+    await conn.query('UPDATE debts SET paid = ?, remaining = ?, status = ? WHERE id = ?',
+      [newPaid, Math.max(newRemaining, 0), newStatus, req.params.id]);
+    
+    await conn.commit();
+    res.json({ message: newStatus === 'paid' ? 'Kasbon LUNAS! 🎉' : 'Pembayaran berhasil dicatat.', paid: payAmount, remaining: Math.max(newRemaining, 0), status: newStatus });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// GET customer suggestions for kasbon (autocomplete)
+app.get('/api/kasbon-customers', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT customer_name as name, customer_phone as phone, 
+      COUNT(*) as total_debts, COALESCE(SUM(remaining), 0) as total_remaining
+      FROM debts GROUP BY customer_name, customer_phone ORDER BY customer_name`);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ============ SETTINGS ============
 app.get('/api/settings', authenticateToken, async (req, res) => {
@@ -856,6 +1029,14 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
           [item.id, item.name, 'sale', -item.qty, afterStock + item.qty, afterStock, 'transactions', txId, 'Penjualan', userId, userName]
         );
       } catch (e) { console.log('Stock movement log failed:', e.message); }
+    }
+
+    // Create kasbon/debt record if payment method is Hutang
+    if ((payment_method || '').toLowerCase() === 'hutang') {
+      await conn.query(
+        'INSERT INTO debts (customer_name, customer_phone, transaction_id, amount, paid, remaining, status, notes, user_id, user_name) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)',
+        [customer_name || 'Tanpa Nama', req.body.customer_phone || null, txId, total, total, 'unpaid', notes || null, userId, userName]
+      );
     }
 
     await conn.commit();
@@ -1615,8 +1796,8 @@ app.post('/api/products/import', authenticateToken, authorizeRole('admin', 'owne
       try {
         const categoryId = p.category_name ? (catMap[p.category_name.toLowerCase()] || null) : null;
         await pool.query(
-          'INSERT INTO products (barcode, name, price, cost_price, stock, min_stock, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [p.barcode || null, p.name, p.price || 0, p.cost_price || 0, p.stock || 0, p.min_stock || 5, categoryId]
+          'INSERT INTO products (barcode, name, price, cost_price, stock, min_stock, category_id, unit, purchase_unit, conversion_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [p.barcode || null, p.name, p.price || 0, p.cost_price || 0, p.stock || 0, p.min_stock || 5, categoryId, p.unit || 'pcs', p.purchase_unit || null, p.conversion_ratio || 1]
         );
         imported++;
       } catch (e) {

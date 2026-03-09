@@ -1480,6 +1480,7 @@ const NAV_ITEMS = [
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
   { id: 'profitloss', icon: '💹', label: 'Laba Rugi', roles: ['owner','admin'] },
   { id: 'suppliers', icon: '🏭', label: 'Supplier', roles: ['owner','admin'] },
+  { id: 'kasbon', icon: '📝', label: 'Kasbon', roles: ['owner','admin','kasir'] },
   { id: 'stockin', icon: '📥', label: 'Stok Masuk', roles: ['owner','admin'] },
   { id: 'stockopname', icon: '📋', label: 'Stok Opname', roles: ['owner','admin'] },
   { id: 'stockcard', icon: '📊', label: 'Kartu Stok', roles: ['owner','admin'] },
@@ -1525,6 +1526,7 @@ function navigateTo(page) {
     reports: renderReports,
     profitloss: renderProfitLoss,
     suppliers: renderSuppliers,
+    kasbon: renderKasbon,
     stockin: renderStockIn,
     stockopname: renderStockOpname,
     stockcard: renderStockCard,
@@ -1772,11 +1774,13 @@ async function renderPOS() {
   }
   main.innerHTML = loadingHtml();
   try {
-    const [prodData, catData, settingsData] = await Promise.all([
+    const [prodData, catData, settingsData, tiersData] = await Promise.all([
       apiFetch('/api/products'),
       apiFetch('/api/categories'),
-      apiFetch('/api/settings').catch(() => ({}))
+      apiFetch('/api/settings').catch(() => ({})),
+      apiFetch('/api/price-tiers').catch(() => [])
     ]);
+    window._priceTiers = tiersData || [];
     appSettings = settingsData || {};
     posProducts = prodData.products || prodData || [];
     posCategories = catData.categories || catData || [];
@@ -1839,13 +1843,15 @@ function renderProductGrid() {
     const oos = (p.stock !== undefined && p.stock !== null && p.stock <= 0);
     const catColor = p.category_color || '#6b7280';
     const lowStk = (!oos && p.min_stock && p.stock <= p.min_stock);
+    const hasTiers = (window._priceTiers || []).some(t => t.product_id === p.id);
     return '<div class="product-card' + (oos ? ' out-of-stock' : '') + '" style="' + (lowStk ? 'border: 2px solid #f59e0b;' : '') + 'position:relative" onclick="addToCart(' + p.id + ')">' +
+      (hasTiers ? '<span style="position:absolute;top:4px;left:4px;background:#8b5cf6;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">GROSIR</span>' : '') +
       (lowStk ? '<span class="stock-warning-badge" title="Stok menipis!">⚠️</span>' : '') +
       '<div class="p-name">' + escHtml(p.name) + '</div>' +
       (p.barcode ? '<div class="p-barcode">' + escHtml(p.barcode) + '</div>' : '') +
-      '<div class="p-price">' + formatRp(p.price) + '</div>' +
+      '<div class="p-price">' + formatRp(p.price) + '<span style="font-size:10px;color:#64748b">/' + escHtml(p.unit || 'pcs') + '</span></div>' +
       '<div class="p-meta">' +
-        '<span class="p-stock"' + (lowStk ? ' style="color:#f59e0b;font-weight:700"' : '') + '>' + (oos ? '❌ Habis' : (lowStk ? '⚠️ ' + p.stock : '📦 ' + p.stock)) + '</span>' +
+        '<span class="p-stock"' + (lowStk ? ' style="color:#f59e0b;font-weight:700"' : '') + '>' + (oos ? '❌ Habis' : (lowStk ? '⚠️ ' + p.stock + ' ' + escHtml(p.unit||'pcs') : '📦 ' + p.stock + ' ' + escHtml(p.unit||'pcs'))) + '</span>' +
         (p.category_name ? '<span class="category-badge" style="background:' + escHtml(catColor) + '">' + escHtml(p.category_name) + '</span>' : '') +
       '</div></div>';
   }).join('');
@@ -2012,8 +2018,9 @@ function addToCart(productId) {
       return;
     }
     existing.qty++;
+    applyTieredPrice(cart.indexOf(existing));
   } else {
-    cart.push({ id: p.id, name: p.name, price: Number(p.price), cost_price: Number(p.cost_price || 0), qty: 1, discount: 0 });
+    cart.push({ id: p.id, name: p.name, price: Number(p.price), cost_price: Number(p.cost_price || 0), qty: 1, discount: 0, unit: p.unit || 'pcs' });
   }
   updateCartUI();
 }
@@ -2032,8 +2039,27 @@ function changeQty(idx, delta) {
       cart[idx].qty = p.stock;
       showToast('Stok tidak mencukupi', 'warning');
     }
+    // Auto-apply tiered pricing
+    applyTieredPrice(idx);
   }
   updateCartUI();
+}
+
+function applyTieredPrice(idx) {
+  const item = cart[idx];
+  if (!item) return;
+  const tiers = (window._priceTiers || []).filter(t => t.product_id === item.id).sort((a,b) => b.min_qty - a.min_qty);
+  if (tiers.length === 0) return;
+  const p = posProducts.find(x => x.id === item.id);
+  const basePrice = p ? Number(p.price) : item.price;
+  let appliedPrice = basePrice;
+  for (const t of tiers) {
+    if (item.qty >= t.min_qty) { appliedPrice = Number(t.price); break; }
+  }
+  if (appliedPrice !== item.price) {
+    item.price = appliedPrice;
+    if (appliedPrice < basePrice) showToast('Harga grosir diterapkan! ' + formatRp(appliedPrice), 'info');
+  }
 }
 
 function updateItemDiscount(idx, val) {
@@ -2079,7 +2105,7 @@ function renderCartPanel() {
       html += '<div class="cart-item">' +
         '<div class="cart-item-info">' +
           '<div class="cart-item-name">' + escHtml(c.name) + '</div>' +
-          '<div class="cart-item-price">' + formatRp(c.price) + ' x ' + c.qty + '</div>' +
+          '<div class="cart-item-price">' + formatRp(c.price) + '/' + escHtml(c.unit || 'pcs') + ' x ' + c.qty + (function(){ const p = posProducts.find(x=>x.id===c.id); const base = p ? Number(p.price) : c.price; return c.price < base ? ' <span style="color:#8b5cf6;font-size:10px">🏷️GROSIR</span>' : ''; }()) + '</div>' +
           '<div class="cart-item-disc">Disc: <input type="number" min="0" value="' + c.discount + '" onchange="updateItemDiscount(' + i + ',this.value)" placeholder="0"></div>' +
         '</div>' +
         '<div class="qty-control">' +
@@ -2108,7 +2134,7 @@ function renderCartPanel() {
 
   // Payment methods
   html += '<div class="payment-methods">';
-  ['Cash','QRIS','Transfer','Kartu'].forEach(m => {
+  ['Cash','QRIS','Transfer','Kartu','Hutang'].forEach(m => {
     html += '<div class="pay-method-btn' + (selectedPayMethod === m ? ' active' : '') + '" onclick="selectPayMethod(\'' + m + '\')">' + m + '</div>';
   });
   html += '</div>';
@@ -2117,6 +2143,14 @@ function renderCartPanel() {
   if (selectedPayMethod === 'Cash') {
     html += '<div class="payment-input"><input type="text" inputmode="numeric" id="paymentAmount" placeholder="Jumlah bayar..." oninput="formatMoneyInput(this); calcChange()"></div>';
     html += '<div class="change-display">Kembalian: <span id="changeAmount">Rp 0</span></div>';
+  }
+  if (selectedPayMethod === 'Hutang') {
+    html += '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px;margin-bottom:8px">';
+    html += '<div style="font-size:12px;color:#92400e;margin-bottom:6px">📝 <strong>Kasbon</strong> — Wajib isi nama pelanggan</div>';
+    html += '<input type="text" id="kasbonName" placeholder="Nama pelanggan..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:4px" list="kasbonCustomerList">';
+    html += '<datalist id="kasbonCustomerList"></datalist>';
+    html += '<input type="text" id="kasbonPhone" placeholder="No HP (opsional)" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px">';
+    html += '</div>';
   }
 
   // Notes
@@ -2134,6 +2168,16 @@ function renderCartPanel() {
 function selectPayMethod(m) {
   selectedPayMethod = m;
   updateCartUI();
+  if (m === 'Hutang') loadKasbonCustomers();
+}
+
+function loadKasbonCustomers() {
+  apiFetch('/api/kasbon-customers').then(customers => {
+    const dl = document.getElementById('kasbonCustomerList');
+    if (dl) {
+      dl.innerHTML = customers.map(c => '<option value="' + escHtml(c.name) + '">' + escHtml(c.name) + (c.total_remaining > 0 ? ' (hutang: ' + formatRp(c.total_remaining) + ')' : '') + '</option>').join('');
+    }
+  }).catch(() => {});
 }
 
 function calcChange() {
@@ -2164,6 +2208,8 @@ async function processPayment() {
   const { taxAmt, serviceAmt, grandTotal } = calcTaxService(subtotal, totalDiscount);
 
   let payment = grandTotal;
+  let kasbonName = '';
+  let kasbonPhone = '';
   if (selectedPayMethod === 'Cash') {
     const payEl = document.getElementById('paymentAmount');
     payment = payEl ? parseMoneyValue('paymentAmount') : 0;
@@ -2171,6 +2217,15 @@ async function processPayment() {
       showToast('Pembayaran kurang!', 'error');
       return;
     }
+  }
+  if (selectedPayMethod === 'Hutang') {
+    kasbonName = (document.getElementById('kasbonName') || {}).value || '';
+    kasbonPhone = (document.getElementById('kasbonPhone') || {}).value || '';
+    if (!kasbonName.trim()) {
+      showToast('Nama pelanggan wajib diisi untuk kasbon!', 'error');
+      return;
+    }
+    payment = 0; // No payment yet
   }
 
   const change = payment - grandTotal;
@@ -2183,10 +2238,11 @@ async function processPayment() {
     discount: totalDiscount,
     total: grandTotal,
     payment: payment,
-    change: change,
+    change: selectedPayMethod === 'Hutang' ? 0 : change,
     payment_method: selectedPayMethod,
     customer_id: null,
-    customer_name: 'Umum',
+    customer_name: selectedPayMethod === 'Hutang' ? kasbonName : 'Umum',
+    customer_phone: selectedPayMethod === 'Hutang' ? kasbonPhone : null,
     notes: notes,
     tax_amount: taxAmt,
     tax_name: appSettings.tax_enabled ? (appSettings.tax_name || 'Pajak') : null,
@@ -2410,9 +2466,9 @@ async function renderProducts() {
     let html = '<div class="page-header"><h1>📦 Kelola Produk</h1><p>Manajemen produk dan stok</p></div>';
     html += '<div class="toolbar"><input class="search-input" placeholder="🔍 Cari produk..." oninput="filterProductTable(this.value)"><div class="spacer"></div><button class="btn btn-primary" onclick="showProductModal()">+ Tambah Produk</button></div>';
 
-    html += '<div class="card"><div class="overflow-x"><table id="productTable"><thead><tr><th>Barcode</th><th>Nama</th><th>Kategori</th><th>Harga Jual</th><th>Modal</th><th>Profit</th><th>Stok</th><th>Min</th><th>Aksi</th></tr></thead><tbody>';
+    html += '<div class="card"><div class="overflow-x"><table id="productTable"><thead><tr><th>Barcode</th><th>Nama</th><th>Kategori</th><th>Harga Jual</th><th>Modal</th><th>Profit</th><th>Stok</th><th>Satuan</th><th>Min</th><th>Aksi</th></tr></thead><tbody>';
     if (products.length === 0) {
-      html += '<tr><td colspan="9">' + emptyHtml('📦', 'Belum ada produk') + '</td></tr>';
+      html += '<tr><td colspan="10">' + emptyHtml('📦', 'Belum ada produk') + '</td></tr>';
     } else {
       products.forEach(p => {
         const catColor = p.category_color || '#6b7280';
@@ -2427,6 +2483,7 @@ async function renderProducts() {
           '<td>' + (p.cost_price ? formatRp(p.cost_price) : '<span style="color:#999">-</span>') + '</td>' +
           '<td><strong style="color:' + profitColor + '">' + (p.cost_price ? formatRp(profit) : '-') + '</strong></td>' +
           '<td>' + (low ? '<span class="low-stock-tag">' + p.stock + '</span>' : p.stock) + '</td>' +
+          '<td><span style="font-size:12px">' + escHtml(p.unit || 'pcs') + (p.purchase_unit ? '<br><span style="color:#64748b">beli: ' + escHtml(p.purchase_unit) + ' (1:' + (p.conversion_ratio||1) + ')</span>' : '') + '</span></td>' +
           '<td>' + (p.min_stock||0) + '</td>' +
           '<td><button class="btn btn-sm btn-primary" onclick=\'showProductModal(' + JSON.stringify(p).replace(/'/g, "\\'") + ')\'>✏️</button> ' +
           '<button class="btn btn-sm btn-danger" onclick="deleteProduct(' + p.id + ')">🗑️</button></td></tr>';
@@ -2462,14 +2519,30 @@ function showProductModal(product) {
   html += '<div class="form-group"><label>Harga Modal</label><input id="pCostPrice" type="text" inputmode="numeric" value="' + formatDots(product?.cost_price || 0) + '" oninput="formatMoneyInput(this)" placeholder="Harga beli/modal"></div>';
   html += '<div class="form-group"><label>Stok *</label><input id="pStock" type="number" min="0" value="' + (product?.stock ?? '') + '" required></div>';
   html += '<div class="form-group"><label>Stok Minimum</label><input id="pMinStock" type="number" min="0" value="' + (product?.min_stock || 0) + '"></div>';
+  html += '<div style="border-top:1px solid #e2e8f0;margin:12px 0;padding-top:12px"><strong>📏 Satuan</strong></div>';
+  html += '<div class="form-row"><div class="form-group" style="flex:1"><label>Satuan Jual</label><select id="pUnit"><option value="pcs"' + ((product?.unit||'pcs')==='pcs'?' selected':'') + '>pcs</option><option value="kg"' + ((product?.unit)==='kg'?' selected':'') + '>kg</option><option value="gram"' + ((product?.unit)==='gram'?' selected':'') + '>gram</option><option value="liter"' + ((product?.unit)==='liter'?' selected':'') + '>liter</option><option value="ml"' + ((product?.unit)==='ml'?' selected':'') + '>ml</option><option value="meter"' + ((product?.unit)==='meter'?' selected':'') + '>meter</option><option value="lembar"' + ((product?.unit)==='lembar'?' selected':'') + '>lembar</option><option value="bungkus"' + ((product?.unit)==='bungkus'?' selected':'') + '>bungkus</option><option value="botol"' + ((product?.unit)==='botol'?' selected':'') + '>botol</option><option value="sachet"' + ((product?.unit)==='sachet'?' selected':'') + '>sachet</option></select></div>';
+  html += '<div class="form-group" style="flex:1"><label>Satuan Beli (opsional)</label><select id="pPurchaseUnit"><option value="">-- Sama --</option><option value="karung"' + ((product?.purchase_unit)==='karung'?' selected':'') + '>karung</option><option value="box"' + ((product?.purchase_unit)==='box'?' selected':'') + '>box</option><option value="lusin"' + ((product?.purchase_unit)==='lusin'?' selected':'') + '>lusin</option><option value="dus"' + ((product?.purchase_unit)==='dus'?' selected':'') + '>dus</option><option value="bal"' + ((product?.purchase_unit)==='bal'?' selected':'') + '>bal</option><option value="pack"' + ((product?.purchase_unit)==='pack'?' selected':'') + '>pack</option><option value="roll"' + ((product?.purchase_unit)==='roll'?' selected':'') + '>roll</option><option value="sak"' + ((product?.purchase_unit)==='sak'?' selected':'') + '>sak</option></select></div>';
+  html += '<div class="form-group" style="flex:1"><label>Konversi (1 beli = ? jual)</label><input id="pConversionRatio" type="number" min="1" step="0.01" value="' + (product?.conversion_ratio || 1) + '" placeholder="cth: 25"></div></div>';
   html += '<div class="form-group"><label>Kategori</label><select id="pCategory"><option value="">-- Pilih Kategori --</option>';
   cats.forEach(c => {
     html += '<option value="' + c.id + '"' + (product?.category_id === c.id ? ' selected' : '') + '>' + escHtml(c.name) + '</option>';
   });
   html += '</select></div>';
+  html += '<div style="border-top:1px solid #e2e8f0;margin:12px 0;padding-top:12px"><strong>🏷️ Harga Grosir</strong> <span style="color:#64748b;font-size:12px">(opsional)</span></div>';
+  html += '<div id="tierRows">';
+  if (isEdit && product.id) {
+    html += '<div style="text-align:center;padding:8px;color:#64748b;font-size:12px">Memuat harga grosir...</div>';
+  } else {
+    html += '<div style="color:#64748b;font-size:12px;padding:4px 0">Simpan produk dulu, lalu edit untuk atur harga grosir.</div>';
+  }
+  html += '</div>';
+  if (isEdit && product.id) {
+    html += '<button type="button" class="btn btn-sm" style="margin-top:6px;font-size:12px" onclick="addTierRow()">+ Tambah Level Harga</button>';
+  }
   html += '</form></div>';
   html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveProduct(' + (isEdit ? product.id : 'null') + ')">Simpan</button></div>';
   openModal(html);
+  if (isEdit && product.id) { setTimeout(() => loadTierRows(product.id), 100); }
 }
 
 async function saveProduct(id) {
@@ -2480,15 +2553,20 @@ async function saveProduct(id) {
     cost_price: parseMoneyValue('pCostPrice'),
     stock: Number(document.getElementById('pStock').value),
     min_stock: Number(document.getElementById('pMinStock').value) || 0,
-    category_id: document.getElementById('pCategory').value ? Number(document.getElementById('pCategory').value) : null
+    category_id: document.getElementById('pCategory').value ? Number(document.getElementById('pCategory').value) : null,
+    unit: document.getElementById('pUnit').value || 'pcs',
+    purchase_unit: document.getElementById('pPurchaseUnit').value || null,
+    conversion_ratio: Number(document.getElementById('pConversionRatio').value) || 1
   };
   if (!payload.name) { showToast('Nama produk wajib diisi', 'error'); return; }
   try {
     if (id) {
       await apiFetch('/api/products/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+      await saveTiers(id);
       showToast('Produk berhasil diperbarui');
     } else {
-      await apiFetch('/api/products', { method: 'POST', body: JSON.stringify(payload) });
+      const newProd = await apiFetch('/api/products', { method: 'POST', body: JSON.stringify(payload) });
+      if (newProd.product && newProd.product.id) await saveTiers(newProd.product.id);
       showToast('Produk berhasil ditambahkan');
     }
     closeModal();
@@ -2496,6 +2574,52 @@ async function saveProduct(id) {
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+// Tier price management in product modal
+function loadTierRows(productId) {
+  apiFetch('/api/products/' + productId + '/price-tiers').then(tiers => {
+    const container = document.getElementById('tierRows');
+    if (!container) return;
+    container.innerHTML = '';
+    if (tiers.length === 0) {
+      container.innerHTML = '<div style="color:#64748b;font-size:12px;padding:4px 0">Belum ada harga grosir</div>';
+    } else {
+      tiers.forEach(t => {
+        addTierRow(t.min_qty, t.price);
+      });
+    }
+  }).catch(() => {});
+}
+
+function addTierRow(minQty, price) {
+  const container = document.getElementById('tierRows');
+  if (!container) return;
+  // Remove placeholder text if exists
+  const placeholder = container.querySelector('div[style*="color:#64748b"]');
+  if (placeholder) placeholder.remove();
+  const row = document.createElement('div');
+  row.className = 'form-row';
+  row.style.cssText = 'margin-bottom:4px;align-items:center';
+  row.innerHTML = '<div class="form-group" style="flex:1;margin:0"><input type="number" class="tier-min-qty" min="2" value="' + (minQty || '') + '" placeholder="Min qty" style="padding:6px 8px"></div>' +
+    '<span style="padding:0 4px;color:#64748b">→</span>' +
+    '<div class="form-group" style="flex:1;margin:0"><input type="text" inputmode="numeric" class="tier-price" value="' + (price ? formatDots(price) : '') + '" placeholder="Harga" oninput="formatMoneyInput(this)" style="padding:6px 8px"></div>' +
+    '<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;padding:4px">✕</button>';
+  container.appendChild(row);
+}
+
+async function saveTiers(productId) {
+  const rows = document.querySelectorAll('#tierRows .form-row');
+  const tiers = [];
+  rows.forEach(row => {
+    const minQty = Number(row.querySelector('.tier-min-qty').value);
+    const priceInput = row.querySelector('.tier-price');
+    const price = Number(priceInput.value.replace(/\./g, '').replace(/,/g, '')) || 0;
+    if (minQty > 0 && price > 0) tiers.push({ min_qty: minQty, price });
+  });
+  try {
+    await apiFetch('/api/products/' + productId + '/price-tiers', { method: 'POST', body: JSON.stringify({ tiers }) });
+  } catch (e) { console.log('Save tiers error:', e); }
 }
 
 async function deleteProduct(id) {
@@ -2506,6 +2630,160 @@ async function deleteProduct(id) {
     renderProducts();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// ============ KASBON (HUTANG) ============
+async function renderKasbon() {
+  const main = document.getElementById('mainContent');
+  try {
+    const { debts, summary } = await apiFetch('/api/debts');
+    
+    let html = '<div class="page-header"><h1>📝 Kasbon / Hutang</h1><p>Kelola hutang pelanggan</p></div>';
+    
+    // Summary cards
+    html += '<div class="stats-grid">';
+    html += '<div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#d97706">📋</div><div class="stat-info"><div class="stat-value">' + (summary.unpaid_count + summary.partial_count) + '</div><div class="stat-label">Kasbon Aktif</div></div></div>';
+    html += '<div class="stat-card"><div class="stat-icon" style="background:#fee2e2;color:#dc2626">💰</div><div class="stat-info"><div class="stat-value">' + formatRp(summary.total_remaining) + '</div><div class="stat-label">Total Hutang</div></div></div>';
+    html += '<div class="stat-card"><div class="stat-icon" style="background:#dcfce7;color:#16a34a">✅</div><div class="stat-info"><div class="stat-value">' + formatRp(summary.total_paid) + '</div><div class="stat-label">Total Dibayar</div></div></div>';
+    html += '<div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5">📊</div><div class="stat-info"><div class="stat-value">' + summary.paid_count + '</div><div class="stat-label">Lunas</div></div></div>';
+    html += '</div>';
+    
+    // Filter
+    html += '<div class="toolbar">';
+    html += '<input class="search-input" placeholder="🔍 Cari nama pelanggan..." oninput="filterKasbonTable(this.value)">';
+    html += '<div class="spacer"></div>';
+    html += '<select onchange="filterKasbonStatus(this.value)" style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius)"><option value="all">Semua Status</option><option value="unpaid">Belum Bayar</option><option value="partial">Bayar Sebagian</option><option value="paid">Lunas</option></select>';
+    html += '</div>';
+    
+    // Table
+    html += '<div class="card"><div class="overflow-x"><table id="kasbonTable"><thead><tr><th>Tanggal</th><th>Pelanggan</th><th>No HP</th><th>Total Hutang</th><th>Dibayar</th><th>Sisa</th><th>Status</th><th>Aksi</th></tr></thead><tbody>';
+    if (debts.length === 0) {
+      html += '<tr><td colspan="8">' + emptyHtml('📝', 'Belum ada kasbon') + '</td></tr>';
+    } else {
+      debts.forEach(d => {
+        const statusBadge = d.status === 'paid' ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px">✅ Lunas</span>' :
+          d.status === 'partial' ? '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:12px;font-size:11px">⏳ Sebagian</span>' :
+          '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:11px">❌ Belum</span>';
+        html += '<tr data-search="' + escHtml((d.customer_name||'').toLowerCase()) + '" data-status="' + d.status + '">' +
+          '<td>' + formatDate(d.created_at) + '</td>' +
+          '<td><strong>' + escHtml(d.customer_name) + '</strong></td>' +
+          '<td>' + escHtml(d.customer_phone || '-') + '</td>' +
+          '<td>' + formatRp(d.amount) + '</td>' +
+          '<td>' + formatRp(d.paid) + '</td>' +
+          '<td><strong style="color:#dc2626">' + formatRp(d.remaining) + '</strong></td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + (d.status !== 'paid' ? '<button class="btn btn-sm btn-success" onclick="showPayDebtModal(' + d.id + ',\'' + escHtml(d.customer_name).replace(/'/g, "\\'") + '\',' + d.remaining + ')">💵 Bayar</button> ' : '') +
+          '<button class="btn btn-sm btn-primary" onclick="showDebtDetail(' + d.id + ')">📋</button></td></tr>';
+      });
+    }
+    html += '</tbody></table></div></div>';
+    
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat kasbon: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+function filterKasbonTable(val) {
+  const rows = document.querySelectorAll('#kasbonTable tbody tr');
+  const s = val.toLowerCase();
+  rows.forEach(r => { r.style.display = (r.dataset.search || '').includes(s) ? '' : 'none'; });
+}
+
+function filterKasbonStatus(status) {
+  const rows = document.querySelectorAll('#kasbonTable tbody tr');
+  rows.forEach(r => {
+    if (status === 'all') r.style.display = '';
+    else r.style.display = r.dataset.status === status ? '' : 'none';
+  });
+}
+
+function showPayDebtModal(debtId, customerName, remaining) {
+  let html = '<div class="modal-header"><h3>💵 Bayar Kasbon</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body">';
+  html += '<div style="background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:12px">';
+  html += '<div style="font-weight:600">👤 ' + escHtml(customerName) + '</div>';
+  html += '<div style="color:#dc2626;font-size:18px;font-weight:700;margin-top:4px">Sisa: ' + formatRp(remaining) + '</div>';
+  html += '</div>';
+  html += '<div class="form-group"><label>Jumlah Bayar *</label><input type="text" inputmode="numeric" id="debtPayAmount" oninput="formatMoneyInput(this)" placeholder="Masukkan jumlah..."></div>';
+  html += '<div class="form-group"><label>Metode Bayar</label><select id="debtPayMethod"><option>Cash</option><option>QRIS</option><option>Transfer</option><option>Kartu</option></select></div>';
+  html += '<div class="form-group"><label>Catatan</label><input id="debtPayNotes" placeholder="Opsional..."></div>';
+  html += '<button class="btn btn-primary" style="width:100%" onclick="payDebtQuick(' + debtId + ')">Bayar Penuh ' + formatRp(remaining) + '</button>';
+  html += '</div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-success" onclick="payDebt(' + debtId + ')">💵 Bayar</button></div>';
+  openModal(html);
+  // Pre-fill full amount
+  setTimeout(() => {
+    const inp = document.getElementById('debtPayAmount');
+    if (inp) { inp.value = formatDots(remaining); }
+  }, 50);
+}
+
+async function payDebt(debtId) {
+  const amount = parseMoneyValue('debtPayAmount');
+  const payment_method = document.getElementById('debtPayMethod').value;
+  const notes = document.getElementById('debtPayNotes').value;
+  if (!amount || amount <= 0) { showToast('Jumlah bayar harus diisi!', 'error'); return; }
+  try {
+    const result = await apiFetch('/api/debts/' + debtId + '/pay', { method: 'POST', body: JSON.stringify({ amount, payment_method, notes }) });
+    showToast(result.message, 'success');
+    closeModal();
+    renderKasbon();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function payDebtQuick(debtId) {
+  payDebt(debtId);
+}
+
+async function showDebtDetail(debtId) {
+  try {
+    const { debt, payments, items } = await apiFetch('/api/debts/' + debtId);
+    let html = '<div class="modal-header"><h3>📋 Detail Kasbon #' + debtId + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+    html += '<div class="modal-body">';
+    
+    const statusBadge = debt.status === 'paid' ? '✅ Lunas' : debt.status === 'partial' ? '⏳ Bayar Sebagian' : '❌ Belum Bayar';
+    html += '<div style="background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:12px">';
+    html += '<div style="display:flex;justify-content:space-between"><strong>👤 ' + escHtml(debt.customer_name) + '</strong><span>' + statusBadge + '</span></div>';
+    html += '<div style="color:#64748b;font-size:12px;margin-top:4px">' + formatDateTime(debt.created_at) + ' · Kasir: ' + escHtml(debt.user_name || '-') + '</div>';
+    if (debt.customer_phone) html += '<div style="color:#64748b;font-size:12px">📞 ' + escHtml(debt.customer_phone) + '</div>';
+    html += '</div>';
+    
+    // Items
+    if (items.length > 0) {
+      html += '<div style="margin-bottom:12px"><strong>🛒 Barang:</strong>';
+      html += '<table style="width:100%;font-size:12px;margin-top:4px"><thead><tr><th style="text-align:left">Produk</th><th>Qty</th><th style="text-align:right">Harga</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>';
+      items.forEach(i => {
+        html += '<tr><td>' + escHtml(i.product_name) + '</td><td style="text-align:center">' + i.qty + '</td><td style="text-align:right">' + formatRp(i.price) + '</td><td style="text-align:right">' + formatRp(i.subtotal) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    
+    // Summary
+    html += '<div style="display:flex;gap:12px;margin-bottom:12px">';
+    html += '<div style="flex:1;background:#fee2e2;padding:8px;border-radius:8px;text-align:center"><div style="font-size:11px;color:#92400e">Total</div><div style="font-weight:700;color:#dc2626">' + formatRp(debt.amount) + '</div></div>';
+    html += '<div style="flex:1;background:#dcfce7;padding:8px;border-radius:8px;text-align:center"><div style="font-size:11px;color:#166534">Dibayar</div><div style="font-weight:700;color:#16a34a">' + formatRp(debt.paid) + '</div></div>';
+    html += '<div style="flex:1;background:#fef3c7;padding:8px;border-radius:8px;text-align:center"><div style="font-size:11px;color:#92400e">Sisa</div><div style="font-weight:700;color:#d97706">' + formatRp(debt.remaining) + '</div></div>';
+    html += '</div>';
+    
+    // Payment history
+    if (payments.length > 0) {
+      html += '<strong>💵 Riwayat Pembayaran:</strong>';
+      html += '<table style="width:100%;font-size:12px;margin-top:4px"><thead><tr><th style="text-align:left">Tanggal</th><th style="text-align:right">Jumlah</th><th>Metode</th><th style="text-align:left">Oleh</th></tr></thead><tbody>';
+      payments.forEach(p => {
+        html += '<tr><td>' + formatDateTime(p.created_at) + '</td><td style="text-align:right;color:#16a34a;font-weight:600">' + formatRp(p.amount) + '</td><td style="text-align:center">' + escHtml(p.payment_method) + '</td><td>' + escHtml(p.user_name || '-') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    
+    html += '</div>';
+    html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>';
+    openModal(html);
+  } catch (err) {
+    showToast('Gagal memuat detail: ' + err.message, 'error');
   }
 }
 
