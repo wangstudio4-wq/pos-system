@@ -433,6 +433,8 @@ async function runAutoMigrate() {
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   // Add PIN column for kasir login
   await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
+  await safeExec('users.fix_is_active', `UPDATE users SET is_active = 1 WHERE is_active IS NULL`);
+  await safeExec('users.default_is_active', `ALTER TABLE users ALTER COLUMN is_active SET DEFAULT 1`);
   // Fase 2: Stock management tables
   await safeExec('Create suppliers', `CREATE TABLE IF NOT EXISTS suppliers (
     id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
@@ -544,6 +546,8 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   // Add PIN column for kasir login
   await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
+  await safeExec('users.fix_is_active', `UPDATE users SET is_active = 1 WHERE is_active IS NULL`);
+  await safeExec('users.default_is_active', `ALTER TABLE users ALTER COLUMN is_active SET DEFAULT 1`);
   // Fase 2: Stock management tables
   await safeExec('Create suppliers', `CREATE TABLE IF NOT EXISTS suppliers (
     id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,

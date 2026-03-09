@@ -47,7 +47,7 @@ router.post('/', authenticateToken, authorizeRole('owner'), async (req, res) => 
     }
 
     const [result] = await pool.query(
-      'INSERT INTO users (username, password, name, role, pin) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO users (username, password, name, role, pin, is_active) VALUES (?, ?, ?, ?, ?, 1)',
       [username, hashedPassword, name, role, hashedPin]
     );
 
