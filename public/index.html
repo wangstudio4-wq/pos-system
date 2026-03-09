@@ -1537,16 +1537,64 @@ function toggleSidebar() {
 }
 
 // ============ HISTORI TRANSAKSI (KASIR) ============
+let historyFilterState = { start_date: '', end_date: '', user_id: '' };
+let historyUsersList = [];
+
 async function renderHistory() {
   const main = document.getElementById('mainContent');
   try {
     const isOwner = currentUser && currentUser.role === 'owner';
-    const endpoint = isOwner ? '/api/transactions' : '/api/my-transactions';
+
+    // Build endpoint with filters
+    let endpoint = isOwner ? '/api/transactions' : '/api/my-transactions';
+    if (isOwner) {
+      const qp = [];
+      if (historyFilterState.start_date && historyFilterState.end_date) {
+        qp.push('start_date=' + historyFilterState.start_date);
+        qp.push('end_date=' + historyFilterState.end_date);
+      }
+      if (historyFilterState.user_id) {
+        qp.push('user_id=' + historyFilterState.user_id);
+      }
+      if (qp.length > 0) endpoint += '?' + qp.join('&');
+
+      // Load users for filter dropdown (once)
+      if (historyUsersList.length === 0) {
+        try {
+          const uData = await apiFetch('/api/users');
+          historyUsersList = (uData.users || uData || []);
+        } catch(e) { historyUsersList = []; }
+      }
+    }
+
     const data = await apiFetch(endpoint);
     const txs = data.transactions || data || [];
 
     let html = '<div class="page-header"><h1>🧾 Histori Transaksi</h1><p>' +
       (isOwner ? 'Semua transaksi dari seluruh kasir' : 'Riwayat transaksi Anda') + '</p></div>';
+
+    // Filter bar (owner only)
+    if (isOwner) {
+      const today = new Date().toISOString().slice(0, 10);
+      html += '<div class="card mb-4" style="padding:16px;">';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">';
+      html += '<div style="flex:1;min-width:140px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">📅 Dari</label>';
+      html += '<input type="date" id="histFilterStart" value="' + (historyFilterState.start_date || '') + '" max="' + today + '" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
+      html += '<div style="flex:1;min-width:140px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">📅 Sampai</label>';
+      html += '<input type="date" id="histFilterEnd" value="' + (historyFilterState.end_date || '') + '" max="' + today + '" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;"></div>';
+      html += '<div style="flex:1;min-width:160px;"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;">👤 Kasir</label>';
+      html += '<select id="histFilterUser" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;">';
+      html += '<option value="">Semua Kasir</option>';
+      historyUsersList.forEach(u => {
+        const sel = (historyFilterState.user_id == u.id) ? ' selected' : '';
+        html += '<option value="' + u.id + '"' + sel + '>' + escHtml(u.name || u.username) + ' (' + u.role + ')</option>';
+      });
+      html += '</select></div>';
+      html += '<div style="display:flex;gap:8px;">';
+      html += '<button onclick="applyHistoryFilter()" class="btn btn-primary" style="padding:8px 16px;font-size:14px;">🔍 Filter</button>';
+      html += '<button onclick="resetHistoryFilter()" class="btn btn-secondary" style="padding:8px 16px;font-size:14px;">↻ Reset</button>';
+      html += '</div></div></div>';
+    }
 
     // Summary
     let totalRevenue = 0;
@@ -1579,6 +1627,18 @@ async function renderHistory() {
   } catch (err) {
     main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat histori: ' + escHtml(err.message) + '</div>';
   }
+}
+
+function applyHistoryFilter() {
+  historyFilterState.start_date = document.getElementById('histFilterStart').value;
+  historyFilterState.end_date = document.getElementById('histFilterEnd').value;
+  historyFilterState.user_id = document.getElementById('histFilterUser').value;
+  renderHistory();
+}
+
+function resetHistoryFilter() {
+  historyFilterState = { start_date: '', end_date: '', user_id: '' };
+  renderHistory();
 }
 
 // ============ DASHBOARD ============

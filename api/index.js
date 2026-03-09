@@ -738,16 +738,26 @@ app.get('/api/my-transactions', authenticateToken, async (req, res) => {
 // GET transactions
 app.get('/api/transactions', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { date, start_date, end_date } = req.query;
+    const { date, start_date, end_date, user_id } = req.query;
     let query = 'SELECT * FROM transactions';
+    let conditions = [];
     let params = [];
 
     if (date) {
-      query += ' WHERE DATE(created_at) = ?';
+      conditions.push('DATE(created_at) = ?');
       params.push(date);
     } else if (start_date && end_date) {
-      query += ' WHERE DATE(created_at) BETWEEN ? AND ?';
+      conditions.push('DATE(created_at) BETWEEN ? AND ?');
       params.push(start_date, end_date);
+    }
+
+    if (user_id) {
+      conditions.push('user_id = ?');
+      params.push(user_id);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
     }
 
     query += ' ORDER BY created_at DESC';
