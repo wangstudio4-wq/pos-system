@@ -453,8 +453,6 @@ tbody tr:hover { background: #f8fafc; }
   color: #fff;
 }
 .cart-header h3 { font-size: 14px; font-weight: 700; }
-.cart-customer { padding: 8px 12px; border-bottom: 1px solid var(--border); background: #fafbfc; }
-.cart-customer select { width: 100%; padding: 6px 8px; border: 2px solid var(--border); border-radius: var(--radius); font-size: 12px; }
 .cart-items { flex: 1; overflow-y: auto; padding: 6px 12px; min-height: 120px; }
 .cart-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 0;
@@ -1477,7 +1475,6 @@ const NAV_ITEMS = [
   { id: 'history', icon: '🧾', label: 'Histori Transaksi', roles: ['owner','kasir'] },
   { id: 'products', icon: '📦', label: 'Kelola Produk', roles: ['owner','admin'] },
   { id: 'categories', icon: '🏷️', label: 'Kategori', roles: ['owner','admin'] },
-  { id: 'customers', icon: '👥', label: 'Pelanggan', roles: ['owner','admin'] },
   { id: 'expenses', icon: '💸', label: 'Pengeluaran', roles: ['owner','admin'] },
   { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin','kasir'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
@@ -1518,7 +1515,6 @@ function navigateTo(page) {
     history: renderHistory,
     products: renderProducts,
     categories: renderCategories,
-    customers: renderCustomers,
     expenses: renderExpenses,
     shifts: renderShifts,
     reports: renderReports,
@@ -1745,7 +1741,6 @@ async function renderDashboard() {
 // ============ POS ============
 let posProducts = [];
 let posCategories = [];
-let posCustomers = [];
 let cart = [];
 let selectedCategory = null;
 let selectedPayMethod = 'Cash';
@@ -1767,19 +1762,16 @@ async function renderPOS() {
   }
   main.innerHTML = loadingHtml();
   try {
-    const [prodData, catData, custData, settingsData] = await Promise.all([
+    const [prodData, catData, settingsData] = await Promise.all([
       apiFetch('/api/products'),
       apiFetch('/api/categories'),
-      apiFetch('/api/customers'),
       apiFetch('/api/settings').catch(() => ({}))
     ]);
     appSettings = settingsData || {};
     posProducts = prodData.products || prodData || [];
     posCategories = catData.categories || catData || [];
-    posCustomers = custData.customers || custData || [];
     if (Array.isArray(posProducts) === false) posProducts = [];
     if (Array.isArray(posCategories) === false) posCategories = [];
-    if (Array.isArray(posCustomers) === false) posCustomers = [];
     cart = [];
     selectedCategory = null;
     selectedPayMethod = 'Cash';
@@ -2067,13 +2059,6 @@ function renderCartPanel() {
     '</button>' +
   '</div>';
 
-  // Customer selector
-  html += '<div class="cart-customer"><select id="cartCustomer"><option value="">Umum (Tanpa Pelanggan)</option>';
-  posCustomers.forEach(c => {
-    html += '<option value="' + c.id + '">' + escHtml(c.name) + (c.phone ? ' - ' + escHtml(c.phone) : '') + '</option>';
-  });
-  html += '</select></div>';
-
   // Cart items
   html += '<div class="cart-items">';
   if (cart.length === 0) {
@@ -2179,10 +2164,6 @@ async function processPayment() {
   }
 
   const change = payment - grandTotal;
-  const custEl = document.getElementById('cartCustomer');
-  const custId = custEl ? custEl.value : '';
-  const custOpt = custEl ? custEl.options[custEl.selectedIndex] : null;
-  const custName = custOpt && custId ? custOpt.textContent.split(' - ')[0].trim() : 'Umum';
   const notesEl = document.getElementById('cartNotes');
   const notes = notesEl ? notesEl.value : '';
 
@@ -2194,8 +2175,8 @@ async function processPayment() {
     payment: payment,
     change: change,
     payment_method: selectedPayMethod,
-    customer_id: custId ? Number(custId) : null,
-    customer_name: custName,
+    customer_id: null,
+    customer_name: 'Umum',
     notes: notes,
     tax_amount: taxAmt,
     tax_name: appSettings.tax_enabled ? (appSettings.tax_name || 'Pajak') : null,
@@ -2235,7 +2216,6 @@ function showReceipt(payload, result) {
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-row"><span>No: #' + escHtml(String(txId)) + '</span><span>' + formatDateTime(now) + '</span></div>';
   html += '<div class="receipt-row"><span>Kasir: ' + escHtml(currentUser.name) + '</span></div>';
-  html += '<div class="receipt-row"><span>Pelanggan: ' + escHtml(payload.customer_name) + '</span></div>';
   html += '<div class="receipt-divider"></div>';
 
   payload.items.forEach(item => {
@@ -2308,11 +2288,8 @@ function holdOrder() {
   if (cart.length === 0) { showToast('Keranjang kosong!', 'warning'); return; }
   const discountEl = document.getElementById('cartDiscount');
   const notesEl = document.getElementById('cartNotes');
-  const custEl = document.getElementById('cartCustomer');
   const totalDiscount = discountEl ? (Number(discountEl.value) || 0) : 0;
   const notes = notesEl ? notesEl.value : '';
-  const custId = custEl ? custEl.value : '';
-  const custName = (custEl && custId) ? custEl.options[custEl.selectedIndex].textContent.split(' - ')[0].trim() : 'Umum';
 
   const subtotal = cart.reduce((s, c) => s + (c.price * c.qty - c.discount), 0);
   const { grandTotal } = calcTaxService(subtotal, totalDiscount);
@@ -2390,8 +2367,7 @@ function resumeHeldOrder(idx) {
     if (discountEl) { discountEl.value = order.discount || 0; }
     const notesEl = document.getElementById('cartNotes');
     if (notesEl) { notesEl.value = order.notes || ''; }
-    const custEl = document.getElementById('cartCustomer');
-    if (custEl && order.custId) { custEl.value = order.custId; }
+
   }, 80);
   showToast('Order dilanjutkan! ▶️', 'success');
   updateHeldBadge();
@@ -2596,104 +2572,7 @@ async function deleteCategory(id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
-// ============ CUSTOMERS ============
-async function renderCustomers() {
-  const main = document.getElementById('mainContent');
-  try {
-    const data = await apiFetch('/api/customers');
-    const customers = data.customers || data || [];
-    let html = '<div class="page-header"><h1>👥 Pelanggan</h1><p>Manajemen data pelanggan</p></div>';
-    html += '<div class="toolbar"><input class="search-input" placeholder="🔍 Cari pelanggan..." oninput="filterCustTable(this.value)"><div class="spacer"></div><button class="btn btn-primary" onclick="showCustomerModal()">+ Tambah Pelanggan</button></div>';
 
-    html += '<div class="card"><div class="overflow-x"><table id="custTable"><thead><tr><th>Nama</th><th>Telepon</th><th>Email</th><th>Alamat</th><th>Aksi</th></tr></thead><tbody>';
-    if (customers.length === 0) {
-      html += '<tr><td colspan="5">' + emptyHtml('👥', 'Belum ada pelanggan') + '</td></tr>';
-    } else {
-      customers.forEach(c => {
-        html += '<tr class="clickable-row" data-search="' + escHtml((c.name||'').toLowerCase() + ' ' + (c.phone||'').toLowerCase()) + '">' +
-          '<td onclick="showCustomerDetail(' + c.id + ')"><strong>' + escHtml(c.name) + '</strong></td>' +
-          '<td>' + escHtml(c.phone || '-') + '</td>' +
-          '<td>' + escHtml(c.email || '-') + '</td>' +
-          '<td>' + escHtml(c.address || '-') + '</td>' +
-          '<td><button class="btn btn-sm btn-primary" onclick=\'event.stopPropagation();showCustomerModal(' + JSON.stringify(c).replace(/'/g, "\\'") + ')\'>✏️</button> ' +
-          '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteCustomer(' + c.id + ')">🗑️</button></td></tr>';
-      });
-    }
-    html += '</tbody></table></div></div>';
-    main.innerHTML = html;
-  } catch (err) { main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat: ' + escHtml(err.message) + '</div>'; }
-}
-
-function filterCustTable(val) {
-  const rows = document.querySelectorAll('#custTable tbody tr');
-  const s = val.toLowerCase();
-  rows.forEach(r => { r.style.display = (r.dataset.search || '').includes(s) ? '' : 'none'; });
-}
-
-function showCustomerModal(cust) {
-  const isEdit = !!cust;
-  let html = '<div class="modal-header"><h3>' + (isEdit ? '✏️ Edit Pelanggan' : '➕ Tambah Pelanggan') + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
-  html += '<div class="modal-body"><form id="custForm">';
-  html += '<div class="form-group"><label>Nama *</label><input id="cName" value="' + escHtml(cust?.name || '') + '" required></div>';
-  html += '<div class="form-group"><label>Telepon</label><input id="cPhone" value="' + escHtml(cust?.phone || '') + '"></div>';
-  html += '<div class="form-group"><label>Email</label><input id="cEmail" type="email" value="' + escHtml(cust?.email || '') + '"></div>';
-  html += '<div class="form-group"><label>Alamat</label><textarea id="cAddress">' + escHtml(cust?.address || '') + '</textarea></div>';
-  html += '</form></div>';
-  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveCustomer(' + (isEdit ? cust.id : 'null') + ')">Simpan</button></div>';
-  openModal(html);
-}
-
-async function saveCustomer(id) {
-  const payload = {
-    name: document.getElementById('cName').value,
-    phone: document.getElementById('cPhone').value || null,
-    email: document.getElementById('cEmail').value || null,
-    address: document.getElementById('cAddress').value || null
-  };
-  if (!payload.name) { showToast('Nama wajib diisi', 'error'); return; }
-  try {
-    if (id) {
-      await apiFetch('/api/customers/' + id, { method: 'PUT', body: JSON.stringify(payload) });
-      showToast('Pelanggan diperbarui');
-    } else {
-      await apiFetch('/api/customers', { method: 'POST', body: JSON.stringify(payload) });
-      showToast('Pelanggan ditambahkan');
-    }
-    closeModal(); renderCustomers();
-  } catch (err) { showToast(err.message, 'error'); }
-}
-
-async function deleteCustomer(id) {
-  if (!confirm('Hapus pelanggan ini?')) return;
-  try {
-    await apiFetch('/api/customers/' + id, { method: 'DELETE' });
-    showToast('Pelanggan dihapus'); renderCustomers();
-  } catch (err) { showToast(err.message, 'error'); }
-}
-
-async function showCustomerDetail(id) {
-  try {
-    const data = await apiFetch('/api/customers/' + id);
-    const cust = data.customer || data;
-    const txs = data.transactions || [];
-    let html = '<div class="modal-header"><h3>👤 ' + escHtml(cust.name) + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
-    html += '<div class="modal-body">';
-    html += '<p>📞 ' + escHtml(cust.phone || '-') + ' | 📧 ' + escHtml(cust.email || '-') + '</p>';
-    html += '<p>📍 ' + escHtml(cust.address || '-') + '</p>';
-    html += '<h4 class="mt-4 mb-2">Riwayat Transaksi</h4>';
-    if (txs.length === 0) {
-      html += '<p style="color:var(--text-secondary)">Belum ada transaksi</p>';
-    } else {
-      html += '<div class="overflow-x"><table><thead><tr><th>Tanggal</th><th>Total</th><th>Metode</th></tr></thead><tbody>';
-      txs.forEach(tx => {
-        html += '<tr><td>' + formatDateTime(tx.created_at || tx.date) + '</td><td>' + formatRp(tx.total) + '</td><td>' + payMethodBadge(tx.payment_method) + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
-    }
-    html += '</div><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>';
-    openModal(html, 'modal-lg');
-  } catch (err) { showToast(err.message, 'error'); }
-}
 
 // ============ EXPENSES ============
 let expenseFilter = '';
@@ -3085,7 +2964,7 @@ async function renderReports() {
     const txs = txData.transactions || txData || [];
     if (Array.isArray(txs) && txs.length > 0) {
       html += '<div class="card mt-4"><div class="card-header"><h3>🧾 Daftar Transaksi</h3></div>';
-      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Metode</th><th>Kasir</th><th>Status</th><th>Aksi</th></tr></thead><tbody>';
+      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Total</th><th>Metode</th><th>Kasir</th><th>Status</th><th>Aksi</th></tr></thead><tbody>';
       txs.slice(0, 50).forEach(tx => {
         const st = tx.status || 'completed';
         const statusBadge = st === 'void' ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">VOID</span>'
@@ -3098,7 +2977,6 @@ async function renderReports() {
         html += '<tr class="clickable-row" onclick="showTransactionDetail(' + tx.id + ')">' +
           '<td>#' + tx.id + '</td>' +
           '<td>' + formatDateTime(tx.created_at || tx.date) + '</td>' +
-          '<td>' + escHtml(tx.customer_name || 'Umum') + '</td>' +
           '<td><strong>' + formatRp(tx.total) + '</strong></td>' +
           '<td>' + payMethodBadge(tx.payment_method) + '</td>' +
           '<td>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</td>' +
@@ -3391,7 +3269,6 @@ async function showTransactionDetail(id) {
     html += '<div class="receipt-divider"></div>';
     html += '<div class="receipt-row"><span>Tanggal</span><span>' + formatDateTime(tx.created_at || tx.date) + '</span></div>';
     html += '<div class="receipt-row"><span>Kasir</span><span>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</span></div>';
-    html += '<div class="receipt-row"><span>Pelanggan</span><span>' + escHtml(tx.customer_name || 'Umum') + '</span></div>';
     html += '<div class="receipt-divider"></div>';
     items.forEach(item => {
       html += '<div class="receipt-item"><div class="item-name">' + escHtml(item.name || item.product_name) + '</div>';

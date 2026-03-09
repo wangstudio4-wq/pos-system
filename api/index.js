@@ -6,7 +6,7 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const authRoutes = require('../routes/auth');
 const userRoutes = require('../routes/users');
 const categoryRoutes = require('../routes/categories');
-const customerRoutes = require('../routes/customers');
+// const customerRoutes = require('../routes/customers'); // Removed - will be replaced by Member & Reward system
 const expenseRoutes = require('../routes/expenses');
 const shiftRoutes = require('../routes/shifts');
 
@@ -55,7 +55,7 @@ app.get('/icons/:file', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/customers', customerRoutes);
+// app.use('/api/customers', customerRoutes); // Removed - will be replaced by Member & Reward system
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/shifts', shiftRoutes);
 
@@ -472,7 +472,7 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 
     const outOfStock = await safeQuery(`SELECT COUNT(*) as count FROM products WHERE stock = 0`) || [{ count: 0 }];
     const totalProducts = await safeQuery('SELECT COUNT(*) as count FROM products') || [{ count: 0 }];
-    const totalCustomers = await safeQuery('SELECT COUNT(*) as count FROM customers') || [{ count: 0 }];
+
     const todayExpenses = await safeQuery(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date = CURDATE()`) || [{ total: 0 }];
 
     // Sales chart
@@ -522,7 +522,7 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
         low: lowStock[0].count,
         out: outOfStock[0].count
       },
-      customers: totalCustomers[0].count,
+
       sales_chart: salesChart,
       recent_transactions: recentTx,
       top_products_today: topToday,
@@ -698,14 +698,6 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
       );
     }
 
-    // Update customer stats if customer selected
-    if (customer_id) {
-      await conn.query(
-        'UPDATE customers SET total_transactions = total_transactions + 1, total_spent = total_spent + ? WHERE id = ?',
-        [total, customer_id]
-      );
-    }
-
     await conn.commit();
 
     res.status(201).json({
@@ -809,11 +801,6 @@ app.post('/api/transactions/:id/void', authenticateToken, authorizeRole('admin',
       await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
     }
 
-    // Update customer stats
-    if (tx[0].customer_id) {
-      await conn.query('UPDATE customers SET total_transactions = total_transactions - 1, total_spent = total_spent - ? WHERE id = ?', [tx[0].total, tx[0].customer_id]);
-    }
-
     await conn.query(
       'UPDATE transactions SET status = ?, void_reason = ?, voided_by = ?, voided_at = NOW() WHERE id = ?',
       ['void', reason, req.user.name || req.user.username, req.params.id]
@@ -845,11 +832,6 @@ app.post('/api/transactions/:id/refund', authenticateToken, authorizeRole('admin
     const [items] = await conn.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [req.params.id]);
     for (const item of items) {
       await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
-    }
-
-    // Update customer stats
-    if (tx[0].customer_id) {
-      await conn.query('UPDATE customers SET total_transactions = total_transactions - 1, total_spent = total_spent - ? WHERE id = ?', [tx[0].total, tx[0].customer_id]);
     }
 
     await conn.query(
