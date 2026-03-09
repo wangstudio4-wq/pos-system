@@ -216,6 +216,78 @@ app.post('/api/setup/init', async (req, res) => {
         (3, 'Snack', '#f59e0b'),
         (4, 'Lainnya', '#6b7280')`);
 
+      // Fase 2: Stock management tables
+      await conn.query(`CREATE TABLE IF NOT EXISTS suppliers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) DEFAULT NULL,
+        email VARCHAR(100) DEFAULT NULL,
+        address TEXT DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS stock_purchases (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        invoice_number VARCHAR(50) DEFAULT NULL,
+        supplier_id INT DEFAULT NULL,
+        supplier_name VARCHAR(100) DEFAULT NULL,
+        user_id INT NOT NULL,
+        user_name VARCHAR(100) DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        total_amount DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS stock_purchase_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        purchase_id INT NOT NULL,
+        product_id INT NOT NULL,
+        product_name VARCHAR(100) NOT NULL,
+        qty INT NOT NULL,
+        cost_price DECIMAL(15,2) DEFAULT 0,
+        subtotal DECIMAL(15,2) DEFAULT 0
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS stock_movements (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        product_id INT NOT NULL,
+        product_name VARCHAR(100) DEFAULT NULL,
+        type ENUM('purchase','sale','void','refund','opname','adjustment','manual') NOT NULL,
+        qty INT NOT NULL,
+        before_stock INT DEFAULT 0,
+        after_stock INT DEFAULT 0,
+        reference_type VARCHAR(50) DEFAULT NULL,
+        reference_id INT DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        user_id INT DEFAULT NULL,
+        user_name VARCHAR(100) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS stock_opname (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        user_name VARCHAR(100) DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        status ENUM('draft','completed') DEFAULT 'draft',
+        total_items INT DEFAULT 0,
+        total_difference INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP NULL DEFAULT NULL
+      )`);
+
+      await conn.query(`CREATE TABLE IF NOT EXISTS stock_opname_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        opname_id INT NOT NULL,
+        product_id INT NOT NULL,
+        product_name VARCHAR(100) NOT NULL,
+        system_stock INT DEFAULT 0,
+        actual_stock INT DEFAULT 0,
+        difference INT DEFAULT 0,
+        notes TEXT DEFAULT NULL
+      )`);
+
       conn.release();
       res.json({ success: true, message: 'Database berhasil diinisialisasi!' });
     } catch (e) {
@@ -274,7 +346,7 @@ app.post('/api/auth/register-owner', async (req, res) => {
 // ============ DEBUG: Check DB schema ============
 app.get('/api/debug/schema', authenticateToken, async (req, res) => {
   try {
-    const tables = ['users', 'products', 'transactions', 'transaction_items', 'categories', 'customers', 'shifts', 'expenses'];
+    const tables = ['users', 'products', 'transactions', 'transaction_items', 'categories', 'customers', 'shifts', 'expenses', 'suppliers', 'stock_purchases', 'stock_purchase_items', 'stock_movements', 'stock_opname', 'stock_opname_items'];
     const schema = {};
     for (const table of tables) {
       try {
@@ -361,6 +433,43 @@ async function runAutoMigrate() {
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   // Add PIN column for kasir login
   await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
+  // Fase 2: Stock management tables
+  await safeExec('Create suppliers', `CREATE TABLE IF NOT EXISTS suppliers (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) DEFAULT NULL, email VARCHAR(100) DEFAULT NULL,
+    address TEXT DEFAULT NULL, notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_purchases', `CREATE TABLE IF NOT EXISTS stock_purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY, invoice_number VARCHAR(50) DEFAULT NULL,
+    supplier_id INT DEFAULT NULL, supplier_name VARCHAR(100) DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    notes TEXT DEFAULT NULL, total_amount DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_purchase_items', `CREATE TABLE IF NOT EXISTS stock_purchase_items (
+    id INT AUTO_INCREMENT PRIMARY KEY, purchase_id INT NOT NULL,
+    product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
+    qty INT NOT NULL, cost_price DECIMAL(15,2) DEFAULT 0,
+    subtotal DECIMAL(15,2) DEFAULT 0)`);
+  await safeExec('Create stock_movements', `CREATE TABLE IF NOT EXISTS stock_movements (
+    id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
+    product_name VARCHAR(100) DEFAULT NULL,
+    type ENUM('purchase','sale','void','refund','opname','adjustment','manual') NOT NULL,
+    qty INT NOT NULL, before_stock INT DEFAULT 0, after_stock INT DEFAULT 0,
+    reference_type VARCHAR(50) DEFAULT NULL, reference_id INT DEFAULT NULL,
+    notes TEXT DEFAULT NULL, user_id INT DEFAULT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_opname', `CREATE TABLE IF NOT EXISTS stock_opname (
+    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+    user_name VARCHAR(100) DEFAULT NULL, notes TEXT DEFAULT NULL,
+    status ENUM('draft','completed') DEFAULT 'draft',
+    total_items INT DEFAULT 0, total_difference INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL DEFAULT NULL)`);
+  await safeExec('Create stock_opname_items', `CREATE TABLE IF NOT EXISTS stock_opname_items (
+    id INT AUTO_INCREMENT PRIMARY KEY, opname_id INT NOT NULL,
+    product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
+    system_stock INT DEFAULT 0, actual_stock INT DEFAULT 0,
+    difference INT DEFAULT 0, notes TEXT DEFAULT NULL)`);
   console.log('✅ Auto-migrate completed');
 }
 runAutoMigrate().catch(err => console.error('Migration error:', err));
@@ -435,6 +544,43 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
   // Add PIN column for kasir login
   await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
+  // Fase 2: Stock management tables
+  await safeExec('Create suppliers', `CREATE TABLE IF NOT EXISTS suppliers (
+    id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) DEFAULT NULL, email VARCHAR(100) DEFAULT NULL,
+    address TEXT DEFAULT NULL, notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_purchases', `CREATE TABLE IF NOT EXISTS stock_purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY, invoice_number VARCHAR(50) DEFAULT NULL,
+    supplier_id INT DEFAULT NULL, supplier_name VARCHAR(100) DEFAULT NULL,
+    user_id INT NOT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    notes TEXT DEFAULT NULL, total_amount DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_purchase_items', `CREATE TABLE IF NOT EXISTS stock_purchase_items (
+    id INT AUTO_INCREMENT PRIMARY KEY, purchase_id INT NOT NULL,
+    product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
+    qty INT NOT NULL, cost_price DECIMAL(15,2) DEFAULT 0,
+    subtotal DECIMAL(15,2) DEFAULT 0)`);
+  await safeExec('Create stock_movements', `CREATE TABLE IF NOT EXISTS stock_movements (
+    id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
+    product_name VARCHAR(100) DEFAULT NULL,
+    type ENUM('purchase','sale','void','refund','opname','adjustment','manual') NOT NULL,
+    qty INT NOT NULL, before_stock INT DEFAULT 0, after_stock INT DEFAULT 0,
+    reference_type VARCHAR(50) DEFAULT NULL, reference_id INT DEFAULT NULL,
+    notes TEXT DEFAULT NULL, user_id INT DEFAULT NULL, user_name VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('Create stock_opname', `CREATE TABLE IF NOT EXISTS stock_opname (
+    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+    user_name VARCHAR(100) DEFAULT NULL, notes TEXT DEFAULT NULL,
+    status ENUM('draft','completed') DEFAULT 'draft',
+    total_items INT DEFAULT 0, total_difference INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL DEFAULT NULL)`);
+  await safeExec('Create stock_opname_items', `CREATE TABLE IF NOT EXISTS stock_opname_items (
+    id INT AUTO_INCREMENT PRIMARY KEY, opname_id INT NOT NULL,
+    product_id INT NOT NULL, product_name VARCHAR(100) NOT NULL,
+    system_stock INT DEFAULT 0, actual_stock INT DEFAULT 0,
+    difference INT DEFAULT 0, notes TEXT DEFAULT NULL)`);
   res.json({ results });
 });
 
@@ -696,6 +842,16 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?',
         [item.qty, item.id, item.qty]
       );
+
+      // Record stock movement for sale
+      try {
+        const [prodStock] = await conn.query('SELECT stock FROM products WHERE id = ?', [item.id]);
+        const afterStock = prodStock.length > 0 ? prodStock[0].stock : 0;
+        await conn.query(
+          'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [item.id, item.name, 'sale', -item.qty, afterStock + item.qty, afterStock, 'transactions', txId, 'Penjualan', userId, userName]
+        );
+      } catch (e) { console.log('Stock movement log failed:', e.message); }
     }
 
     await conn.commit();
@@ -799,6 +955,16 @@ app.post('/api/transactions/:id/void', authenticateToken, authorizeRole('admin',
     const [items] = await conn.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [req.params.id]);
     for (const item of items) {
       await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
+
+      // Record stock movement for void
+      try {
+        const [prodStock] = await conn.query('SELECT stock FROM products WHERE id = ?', [item.product_id]);
+        const afterStock = prodStock.length > 0 ? prodStock[0].stock : 0;
+        await conn.query(
+          'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [item.product_id, item.product_name, 'void', item.qty || item.quantity, afterStock - (item.qty || item.quantity), afterStock, 'transactions', req.params.id, 'Void transaksi', req.user.id, req.user.name || req.user.username]
+        );
+      } catch (e) { console.log('Stock movement log failed:', e.message); }
     }
 
     await conn.query(
@@ -832,6 +998,16 @@ app.post('/api/transactions/:id/refund', authenticateToken, authorizeRole('admin
     const [items] = await conn.query('SELECT * FROM transaction_items WHERE transaction_id = ?', [req.params.id]);
     for (const item of items) {
       await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [item.qty || item.quantity, item.product_id]);
+
+      // Record stock movement for refund
+      try {
+        const [prodStock] = await conn.query('SELECT stock FROM products WHERE id = ?', [item.product_id]);
+        const afterStock = prodStock.length > 0 ? prodStock[0].stock : 0;
+        await conn.query(
+          'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [item.product_id, item.product_name, 'refund', item.qty || item.quantity, afterStock - (item.qty || item.quantity), afterStock, 'transactions', req.params.id, 'Refund transaksi', req.user.id, req.user.name || req.user.username]
+        );
+      } catch (e) { console.log('Stock movement log failed:', e.message); }
     }
 
     await conn.query(
@@ -1068,5 +1244,361 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
   }
 });
 
+
+// ============ SUPPLIER ROUTES ============
+// GET all suppliers
+app.get('/api/suppliers', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM suppliers ORDER BY name ASC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil data supplier.' });
+  }
+});
+
+// POST new supplier
+app.post('/api/suppliers', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { name, phone, email, address, notes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nama supplier wajib diisi.' });
+    const [result] = await pool.query(
+      'INSERT INTO suppliers (name, phone, email, address, notes) VALUES (?, ?, ?, ?, ?)',
+      [name, phone || null, email || null, address || null, notes || null]
+    );
+    res.status(201).json({ message: 'Supplier berhasil ditambahkan!', supplier: { id: result.insertId, name } });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal menambahkan supplier.' });
+  }
+});
+
+// PUT update supplier
+app.put('/api/suppliers/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { name, phone, email, address, notes } = req.body;
+    await pool.query(
+      'UPDATE suppliers SET name=?, phone=?, email=?, address=?, notes=? WHERE id=?',
+      [name, phone || null, email || null, address || null, notes || null, req.params.id]
+    );
+    res.json({ message: 'Supplier berhasil diupdate!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal update supplier.' });
+  }
+});
+
+// DELETE supplier
+app.delete('/api/suppliers/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM suppliers WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Supplier berhasil dihapus!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal menghapus supplier.' });
+  }
+});
+
+// ============ STOCK PURCHASE (STOK MASUK) ============
+// GET all purchases
+app.get('/api/stock-purchases', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { start_date, end_date, supplier_id } = req.query;
+    let query = 'SELECT * FROM stock_purchases';
+    let conditions = [];
+    let params = [];
+    if (start_date && end_date) {
+      conditions.push('DATE(created_at) BETWEEN ? AND ?');
+      params.push(start_date, end_date);
+    }
+    if (supplier_id) {
+      conditions.push('supplier_id = ?');
+      params.push(supplier_id);
+    }
+    if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY created_at DESC';
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil data pembelian.' });
+  }
+});
+
+// GET purchase detail
+app.get('/api/stock-purchases/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const [purchase] = await pool.query('SELECT * FROM stock_purchases WHERE id = ?', [req.params.id]);
+    if (purchase.length === 0) return res.status(404).json({ error: 'Pembelian tidak ditemukan.' });
+    const [items] = await pool.query('SELECT * FROM stock_purchase_items WHERE purchase_id = ?', [req.params.id]);
+    res.json({ purchase: purchase[0], items });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil detail pembelian.' });
+  }
+});
+
+// POST new purchase (creates purchase + adds stock + records movements)
+app.post('/api/stock-purchases', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { invoice_number, supplier_id, supplier_name, items, notes } = req.body;
+    const userId = req.user.id;
+    const userName = req.user.name || req.user.username;
+
+    if (!items || items.length === 0) return res.status(400).json({ error: 'Item pembelian kosong.' });
+
+    const totalAmount = items.reduce((sum, i) => sum + (i.qty * (i.cost_price || 0)), 0);
+
+    const [purchaseResult] = await conn.query(
+      'INSERT INTO stock_purchases (invoice_number, supplier_id, supplier_name, user_id, user_name, notes, total_amount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [invoice_number || null, supplier_id || null, supplier_name || null, userId, userName, notes || null, totalAmount]
+    );
+    const purchaseId = purchaseResult.insertId;
+
+    for (const item of items) {
+      await conn.query(
+        'INSERT INTO stock_purchase_items (purchase_id, product_id, product_name, qty, cost_price, subtotal) VALUES (?, ?, ?, ?, ?, ?)',
+        [purchaseId, item.product_id, item.product_name, item.qty, item.cost_price || 0, item.qty * (item.cost_price || 0)]
+      );
+
+      // Get current stock
+      const [prod] = await conn.query('SELECT stock FROM products WHERE id = ?', [item.product_id]);
+      const beforeStock = prod.length > 0 ? prod[0].stock : 0;
+      const afterStock = beforeStock + item.qty;
+
+      // Update product stock and optionally cost_price
+      if (item.cost_price && item.cost_price > 0) {
+        await conn.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [afterStock, item.cost_price, item.product_id]);
+      } else {
+        await conn.query('UPDATE products SET stock = ? WHERE id = ?', [afterStock, item.product_id]);
+      }
+
+      // Record stock movement
+      await conn.query(
+        'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.product_id, item.product_name, 'purchase', item.qty, beforeStock, afterStock, 'stock_purchases', purchaseId, 'Pembelian stok', userId, userName]
+      );
+    }
+
+    await conn.commit();
+    res.status(201).json({ message: 'Pembelian stok berhasil dicatat!', purchase: { id: purchaseId, total_amount: totalAmount } });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Stock purchase error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan pembelian stok.' });
+  } finally { conn.release(); }
+});
+
+// DELETE purchase (restores stock)
+app.delete('/api/stock-purchases/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [items] = await conn.query('SELECT * FROM stock_purchase_items WHERE purchase_id = ?', [req.params.id]);
+    const userName = req.user.name || req.user.username;
+
+    for (const item of items) {
+      const [prod] = await conn.query('SELECT stock FROM products WHERE id = ?', [item.product_id]);
+      const beforeStock = prod.length > 0 ? prod[0].stock : 0;
+      const afterStock = Math.max(0, beforeStock - item.qty);
+      await conn.query('UPDATE products SET stock = ? WHERE id = ?', [afterStock, item.product_id]);
+      await conn.query(
+        'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.product_id, item.product_name, 'adjustment', -item.qty, beforeStock, afterStock, 'stock_purchases', req.params.id, 'Hapus pembelian stok', req.user.id, userName]
+      );
+    }
+
+    await conn.query('DELETE FROM stock_purchase_items WHERE purchase_id = ?', [req.params.id]);
+    await conn.query('DELETE FROM stock_purchases WHERE id = ?', [req.params.id]);
+    await conn.commit();
+    res.json({ message: 'Pembelian berhasil dihapus dan stok dikembalikan.' });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: 'Gagal menghapus pembelian.' });
+  } finally { conn.release(); }
+});
+
+// ============ STOCK OPNAME ============
+// GET all opname
+app.get('/api/stock-opname', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM stock_opname ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil data opname.' });
+  }
+});
+
+// GET opname detail
+app.get('/api/stock-opname/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const [opname] = await pool.query('SELECT * FROM stock_opname WHERE id = ?', [req.params.id]);
+    if (opname.length === 0) return res.status(404).json({ error: 'Opname tidak ditemukan.' });
+    const [items] = await pool.query('SELECT * FROM stock_opname_items WHERE opname_id = ?', [req.params.id]);
+    res.json({ opname: opname[0], items });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil detail opname.' });
+  }
+});
+
+// POST new opname (draft - loads all products with current stock)
+app.post('/api/stock-opname', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const userName = req.user.name || req.user.username;
+    const { notes } = req.body;
+    const [result] = await pool.query(
+      'INSERT INTO stock_opname (user_id, user_name, notes) VALUES (?, ?, ?)',
+      [req.user.id, userName, notes || null]
+    );
+    const opnameId = result.insertId;
+
+    // Load all products as opname items
+    const [products] = await pool.query('SELECT id, name, stock FROM products ORDER BY name ASC');
+    for (const p of products) {
+      await pool.query(
+        'INSERT INTO stock_opname_items (opname_id, product_id, product_name, system_stock, actual_stock, difference) VALUES (?, ?, ?, ?, ?, 0)',
+        [opnameId, p.id, p.name, p.stock, p.stock]
+      );
+    }
+
+    res.status(201).json({ message: 'Opname baru dibuat!', opname: { id: opnameId } });
+  } catch (err) {
+    console.error('Create opname error:', err);
+    res.status(500).json({ error: 'Gagal membuat opname.' });
+  }
+});
+
+// PUT update opname items (save actual stock counts)
+app.put('/api/stock-opname/:id/items', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'Data item tidak valid.' });
+    for (const item of items) {
+      const diff = (item.actual_stock || 0) - (item.system_stock || 0);
+      await pool.query(
+        'UPDATE stock_opname_items SET actual_stock = ?, difference = ?, notes = ? WHERE id = ?',
+        [item.actual_stock || 0, diff, item.notes || null, item.id]
+      );
+    }
+    res.json({ message: 'Data opname berhasil disimpan!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal menyimpan data opname.' });
+  }
+});
+
+// POST complete opname (apply stock adjustments)
+app.post('/api/stock-opname/:id/complete', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const userName = req.user.name || req.user.username;
+
+    const [opname] = await conn.query('SELECT * FROM stock_opname WHERE id = ?', [req.params.id]);
+    if (opname.length === 0) return res.status(404).json({ error: 'Opname tidak ditemukan.' });
+    if (opname[0].status === 'completed') return res.status(400).json({ error: 'Opname sudah diselesaikan.' });
+
+    const [items] = await conn.query('SELECT * FROM stock_opname_items WHERE opname_id = ?', [req.params.id]);
+
+    let totalDiff = 0;
+    for (const item of items) {
+      if (item.difference !== 0) {
+        totalDiff += Math.abs(item.difference);
+        // Record movement
+        await conn.query(
+          'INSERT INTO stock_movements (product_id, product_name, type, qty, before_stock, after_stock, reference_type, reference_id, notes, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [item.product_id, item.product_name, 'opname', item.difference, item.system_stock, item.actual_stock, 'stock_opname', req.params.id, item.notes || 'Penyesuaian opname', req.user.id, userName]
+        );
+        // Update product stock
+        await conn.query('UPDATE products SET stock = ? WHERE id = ?', [item.actual_stock, item.product_id]);
+      }
+    }
+
+    await conn.query(
+      'UPDATE stock_opname SET status = ?, total_items = ?, total_difference = ?, completed_at = NOW() WHERE id = ?',
+      ['completed', items.length, totalDiff, req.params.id]
+    );
+
+    await conn.commit();
+    res.json({ message: 'Opname selesai! Stok telah disesuaikan.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Complete opname error:', err);
+    res.status(500).json({ error: 'Gagal menyelesaikan opname.' });
+  } finally { conn.release(); }
+});
+
+// DELETE opname (only draft)
+app.delete('/api/stock-opname/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    const [opname] = await pool.query('SELECT status FROM stock_opname WHERE id = ?', [req.params.id]);
+    if (opname.length === 0) return res.status(404).json({ error: 'Opname tidak ditemukan.' });
+    if (opname[0].status === 'completed') return res.status(400).json({ error: 'Opname yang sudah selesai tidak bisa dihapus.' });
+    await pool.query('DELETE FROM stock_opname_items WHERE opname_id = ?', [req.params.id]);
+    await pool.query('DELETE FROM stock_opname WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Opname berhasil dihapus.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal menghapus opname.' });
+  }
+});
+
+// ============ STOCK MOVEMENTS (KARTU STOK) ============
+app.get('/api/stock-movements', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { product_id, start_date, end_date, type } = req.query;
+    let query = 'SELECT * FROM stock_movements';
+    let conditions = [];
+    let params = [];
+    if (product_id) { conditions.push('product_id = ?'); params.push(product_id); }
+    if (start_date && end_date) { conditions.push('DATE(created_at) BETWEEN ? AND ?'); params.push(start_date, end_date); }
+    if (type) { conditions.push('type = ?'); params.push(type); }
+    if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY created_at DESC LIMIT 500';
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal mengambil kartu stok.' });
+  }
+});
+
+// ============ IMPORT PRODUCTS (EXCEL/CSV) ============
+app.post('/api/products/import', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { products } = req.body; // Array of { name, barcode, price, cost_price, stock, min_stock, category_name }
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'Data produk kosong.' });
+    }
+
+    // Get categories for matching
+    const [categories] = await pool.query('SELECT id, name FROM categories');
+    const catMap = {};
+    categories.forEach(c => { catMap[c.name.toLowerCase()] = c.id; });
+
+    let imported = 0;
+    let skipped = 0;
+    let errors = [];
+
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      if (!p.name) { skipped++; errors.push(`Baris ${i+1}: Nama kosong`); continue; }
+      try {
+        const categoryId = p.category_name ? (catMap[p.category_name.toLowerCase()] || null) : null;
+        await pool.query(
+          'INSERT INTO products (barcode, name, price, cost_price, stock, min_stock, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [p.barcode || null, p.name, p.price || 0, p.cost_price || 0, p.stock || 0, p.min_stock || 5, categoryId]
+        );
+        imported++;
+      } catch (e) {
+        if (e.code === 'ER_DUP_ENTRY') {
+          skipped++;
+          errors.push(`Baris ${i+1}: Barcode "${p.barcode}" sudah ada`);
+        } else {
+          skipped++;
+          errors.push(`Baris ${i+1}: ${e.message}`);
+        }
+      }
+    }
+
+    res.json({ message: `Import selesai: ${imported} berhasil, ${skipped} dilewati.`, imported, skipped, errors });
+  } catch (err) {
+    console.error('Import products error:', err);
+    res.status(500).json({ error: 'Gagal import produk.' });
+  }
+});
 
 module.exports = app;

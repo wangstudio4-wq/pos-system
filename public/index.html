@@ -1479,6 +1479,11 @@ const NAV_ITEMS = [
   { id: 'shifts', icon: '⏰', label: 'Shift', roles: ['owner','admin','kasir'] },
   { id: 'reports', icon: '📈', label: 'Laporan', roles: ['owner','admin'] },
   { id: 'profitloss', icon: '💹', label: 'Laba Rugi', roles: ['owner','admin'] },
+  { id: 'suppliers', icon: '🏭', label: 'Supplier', roles: ['owner','admin'] },
+  { id: 'stockin', icon: '📥', label: 'Stok Masuk', roles: ['owner','admin'] },
+  { id: 'stockopname', icon: '📋', label: 'Stok Opname', roles: ['owner','admin'] },
+  { id: 'stockcard', icon: '📊', label: 'Kartu Stok', roles: ['owner','admin'] },
+  { id: 'importproducts', icon: '📤', label: 'Import Produk', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin'] },
@@ -1519,6 +1524,11 @@ function navigateTo(page) {
     shifts: renderShifts,
     reports: renderReports,
     profitloss: renderProfitLoss,
+    suppliers: renderSuppliers,
+    stockin: renderStockIn,
+    stockopname: renderStockOpname,
+    stockcard: renderStockCard,
+    importproducts: renderImportProducts,
     users: renderUsers,
     settings: renderSettings,
     password: renderPassword,
@@ -2496,6 +2506,567 @@ async function deleteProduct(id) {
     renderProducts();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// ============ SUPPLIERS ============
+async function renderSuppliers() {
+  const main = document.getElementById('mainContent');
+  try {
+    const suppliers = await apiFetch('/api/suppliers');
+
+    let html = '<div class="page-header"><h1>🏭 Supplier</h1><p>Kelola data supplier</p></div>';
+    html += '<div class="toolbar"><input class="search-input" placeholder="🔍 Cari supplier..." oninput="filterSupplierTable(this.value)"><div class="spacer"></div><button class="btn btn-primary" onclick="showSupplierModal()">+ Tambah Supplier</button></div>';
+
+    html += '<div class="card"><div class="overflow-x"><table id="supplierTable"><thead><tr><th>Nama</th><th>Telepon</th><th>Email</th><th>Alamat</th><th>Aksi</th></tr></thead><tbody>';
+    if (suppliers.length === 0) {
+      html += '<tr><td colspan="5">' + emptyHtml('🏭', 'Belum ada supplier') + '</td></tr>';
+    } else {
+      suppliers.forEach(s => {
+        html += '<tr data-search="' + escHtml((s.name||'').toLowerCase()) + '">' +
+          '<td><strong>' + escHtml(s.name) + '</strong></td>' +
+          '<td>' + escHtml(s.phone || '-') + '</td>' +
+          '<td>' + escHtml(s.email || '-') + '</td>' +
+          '<td>' + escHtml(s.address || '-') + '</td>' +
+          '<td><button class="btn btn-sm btn-primary" onclick=\'showSupplierModal(' + JSON.stringify(s).replace(/'/g, "\\'") + ')\'>✏️</button> ' +
+          '<button class="btn btn-sm btn-danger" onclick="deleteSupplier(' + s.id + ')">🗑️</button></td></tr>';
+      });
+    }
+    html += '</tbody></table></div></div>';
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat supplier: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+function filterSupplierTable(val) {
+  const rows = document.querySelectorAll('#supplierTable tbody tr');
+  const s = val.toLowerCase();
+  rows.forEach(r => { r.style.display = (r.dataset.search || '').includes(s) ? '' : 'none'; });
+}
+
+function showSupplierModal(supplier) {
+  const isEdit = !!supplier;
+  let html = '<div class="modal-header"><h3>' + (isEdit ? '✏️ Edit Supplier' : '➕ Tambah Supplier') + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body"><form id="supplierForm">';
+  html += '<div class="form-group"><label>Nama Supplier *</label><input id="sName" value="' + escHtml(supplier?.name || '') + '" required></div>';
+  html += '<div class="form-group"><label>Telepon</label><input id="sPhone" value="' + escHtml(supplier?.phone || '') + '"></div>';
+  html += '<div class="form-group"><label>Email</label><input id="sEmail" type="email" value="' + escHtml(supplier?.email || '') + '"></div>';
+  html += '<div class="form-group"><label>Alamat</label><textarea id="sAddress" rows="2">' + escHtml(supplier?.address || '') + '</textarea></div>';
+  html += '<div class="form-group"><label>Catatan</label><textarea id="sNotes" rows="2">' + escHtml(supplier?.notes || '') + '</textarea></div>';
+  html += '</form></div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveSupplier(' + (isEdit ? supplier.id : 'null') + ')">Simpan</button></div>';
+  openModal(html);
+}
+
+async function saveSupplier(id) {
+  const payload = {
+    name: document.getElementById('sName').value,
+    phone: document.getElementById('sPhone').value || null,
+    email: document.getElementById('sEmail').value || null,
+    address: document.getElementById('sAddress').value || null,
+    notes: document.getElementById('sNotes').value || null
+  };
+  if (!payload.name) { showToast('Nama supplier wajib diisi', 'error'); return; }
+  try {
+    if (id) {
+      await apiFetch('/api/suppliers/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+      showToast('Supplier berhasil diperbarui');
+    } else {
+      await apiFetch('/api/suppliers', { method: 'POST', body: JSON.stringify(payload) });
+      showToast('Supplier berhasil ditambahkan');
+    }
+    closeModal();
+    renderSuppliers();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function deleteSupplier(id) {
+  if (!confirm('Hapus supplier ini?')) return;
+  try {
+    await apiFetch('/api/suppliers/' + id, { method: 'DELETE' });
+    showToast('Supplier dihapus');
+    renderSuppliers();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ============ STOK MASUK (PEMBELIAN) ============
+async function renderStockIn() {
+  const main = document.getElementById('mainContent');
+  try {
+    const [purchases, suppliers] = await Promise.all([
+      apiFetch('/api/stock-purchases'),
+      apiFetch('/api/suppliers')
+    ]);
+    window._suppliers = suppliers;
+
+    let html = '<div class="page-header"><h1>📥 Stok Masuk</h1><p>Catat pembelian stok dari supplier</p></div>';
+    html += '<div class="toolbar"><div class="spacer"></div><button class="btn btn-primary" onclick="showStockInModal()">+ Catat Pembelian</button></div>';
+
+    html += '<div class="card"><div class="overflow-x"><table id="stockInTable"><thead><tr><th>#</th><th>Tanggal</th><th>Invoice</th><th>Supplier</th><th>Total</th><th>Dicatat Oleh</th><th>Aksi</th></tr></thead><tbody>';
+    if (purchases.length === 0) {
+      html += '<tr><td colspan="7">' + emptyHtml('📥', 'Belum ada pembelian stok') + '</td></tr>';
+    } else {
+      purchases.forEach(p => {
+        html += '<tr>' +
+          '<td>' + p.id + '</td>' +
+          '<td>' + formatDateTime(p.created_at) + '</td>' +
+          '<td><code>' + escHtml(p.invoice_number || '-') + '</code></td>' +
+          '<td>' + escHtml(p.supplier_name || '-') + '</td>' +
+          '<td><strong>' + formatRp(p.total_amount) + '</strong></td>' +
+          '<td>' + escHtml(p.user_name || '-') + '</td>' +
+          '<td><button class="btn btn-sm btn-primary" onclick="showStockInDetail(' + p.id + ')">👁️</button> ' +
+          '<button class="btn btn-sm btn-danger" onclick="deleteStockIn(' + p.id + ')">🗑️</button></td></tr>';
+      });
+    }
+    html += '</tbody></table></div></div>';
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+async function showStockInDetail(id) {
+  try {
+    const data = await apiFetch('/api/stock-purchases/' + id);
+    const p = data.purchase;
+    const items = data.items || [];
+    let html = '<div class="modal-header"><h3>📥 Detail Pembelian #' + p.id + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+    html += '<div class="modal-body">';
+    html += '<p><strong>Invoice:</strong> ' + escHtml(p.invoice_number || '-') + '</p>';
+    html += '<p><strong>Supplier:</strong> ' + escHtml(p.supplier_name || '-') + '</p>';
+    html += '<p><strong>Tanggal:</strong> ' + formatDateTime(p.created_at) + '</p>';
+    html += '<p><strong>Dicatat oleh:</strong> ' + escHtml(p.user_name || '-') + '</p>';
+    if (p.notes) html += '<p><strong>Catatan:</strong> ' + escHtml(p.notes) + '</p>';
+    html += '<div class="overflow-x" style="margin-top:12px"><table><thead><tr><th>Produk</th><th>Qty</th><th>Harga Beli</th><th>Subtotal</th></tr></thead><tbody>';
+    items.forEach(i => {
+      html += '<tr><td>' + escHtml(i.product_name) + '</td><td>' + i.qty + '</td><td>' + formatRp(i.cost_price) + '</td><td>' + formatRp(i.subtotal) + '</td></tr>';
+    });
+    html += '</tbody><tfoot><tr><td colspan="3" style="font-weight:700;text-align:right">Total</td><td style="font-weight:700">' + formatRp(p.total_amount) + '</td></tr></tfoot></table></div>';
+    html += '</div>';
+    openModal(html);
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+let stockInItems = [];
+
+async function showStockInModal() {
+  stockInItems = [];
+  const products = await apiFetch('/api/products');
+  const prodList = Array.isArray(products) ? products : (products.products || []);
+  window._stockInProducts = prodList;
+  const suppliers = window._suppliers || [];
+
+  let html = '<div class="modal-header"><h3>📥 Catat Pembelian Stok</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
+  html += '<div class="modal-body">';
+  html += '<div class="form-group"><label>No. Invoice</label><input id="siInvoice" placeholder="Opsional"></div>';
+  html += '<div class="form-group"><label>Supplier</label><select id="siSupplier"><option value="">-- Pilih Supplier --</option>';
+  suppliers.forEach(s => { html += '<option value="' + s.id + '" data-name="' + escHtml(s.name) + '">' + escHtml(s.name) + '</option>'; });
+  html += '</select></div>';
+  html += '<div class="form-group"><label>Catatan</label><textarea id="siNotes" rows="2"></textarea></div>';
+  html += '<hr style="margin:12px 0">';
+  html += '<div style="display:flex;gap:8px;margin-bottom:8px"><select id="siProductSelect" style="flex:1"><option value="">-- Pilih Produk --</option>';
+  prodList.forEach(p => { html += '<option value="' + p.id + '">' + escHtml(p.name) + ' (stok: ' + p.stock + ')</option>'; });
+  html += '</select><input id="siQty" type="number" min="1" value="1" style="width:70px" placeholder="Qty">';
+  html += '<input id="siCost" type="text" inputmode="numeric" style="width:120px" placeholder="Harga beli" oninput="formatMoneyInput(this)">';
+  html += '<button class="btn btn-sm btn-primary" onclick="addStockInItem()">+</button></div>';
+  html += '<div id="siItemsTable"></div>';
+  html += '</div>';
+  html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="saveStockIn()">💾 Simpan Pembelian</button></div>';
+  openModal(html);
+  renderStockInItems();
+}
+
+function addStockInItem() {
+  const sel = document.getElementById('siProductSelect');
+  const productId = Number(sel.value);
+  if (!productId) { showToast('Pilih produk dulu', 'error'); return; }
+  const product = (window._stockInProducts || []).find(p => p.id === productId);
+  if (!product) return;
+  const qty = Number(document.getElementById('siQty').value) || 1;
+  const costPrice = parseMoneyValue('siCost') || product.cost_price || 0;
+
+  // Check if already added
+  const existing = stockInItems.find(i => i.product_id === productId);
+  if (existing) {
+    existing.qty += qty;
+    existing.cost_price = costPrice;
+  } else {
+    stockInItems.push({ product_id: productId, product_name: product.name, qty, cost_price: costPrice });
+  }
+  document.getElementById('siQty').value = 1;
+  document.getElementById('siCost').value = '';
+  renderStockInItems();
+}
+
+function removeStockInItem(idx) {
+  stockInItems.splice(idx, 1);
+  renderStockInItems();
+}
+
+function renderStockInItems() {
+  const container = document.getElementById('siItemsTable');
+  if (!container) return;
+  if (stockInItems.length === 0) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:16px">Belum ada item</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Produk</th><th>Qty</th><th>Harga Beli</th><th>Subtotal</th><th></th></tr></thead><tbody>';
+  let total = 0;
+  stockInItems.forEach((item, i) => {
+    const sub = item.qty * item.cost_price;
+    total += sub;
+    html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.qty + '</td><td>' + formatRp(item.cost_price) + '</td><td>' + formatRp(sub) + '</td><td><button class="btn btn-sm btn-danger" onclick="removeStockInItem(' + i + ')">✕</button></td></tr>';
+  });
+  html += '</tbody><tfoot><tr><td colspan="3" style="font-weight:700;text-align:right">Total</td><td colspan="2" style="font-weight:700">' + formatRp(total) + '</td></tr></tfoot></table>';
+  container.innerHTML = html;
+}
+
+async function saveStockIn() {
+  if (stockInItems.length === 0) { showToast('Tambahkan item dulu', 'error'); return; }
+  const supplierSel = document.getElementById('siSupplier');
+  const supplierId = supplierSel.value ? Number(supplierSel.value) : null;
+  const supplierName = supplierSel.selectedOptions[0]?.dataset?.name || null;
+
+  const payload = {
+    invoice_number: document.getElementById('siInvoice').value || null,
+    supplier_id: supplierId,
+    supplier_name: supplierName,
+    notes: document.getElementById('siNotes').value || null,
+    items: stockInItems
+  };
+  try {
+    await apiFetch('/api/stock-purchases', { method: 'POST', body: JSON.stringify(payload) });
+    showToast('Pembelian stok berhasil dicatat!');
+    closeModal();
+    renderStockIn();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function deleteStockIn(id) {
+  if (!confirm('Hapus pembelian ini? Stok akan dikurangi kembali.')) return;
+  try {
+    await apiFetch('/api/stock-purchases/' + id, { method: 'DELETE' });
+    showToast('Pembelian dihapus');
+    renderStockIn();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ============ STOK OPNAME ============
+async function renderStockOpname() {
+  const main = document.getElementById('mainContent');
+  try {
+    const opnames = await apiFetch('/api/stock-opname');
+
+    let html = '<div class="page-header"><h1>📋 Stok Opname</h1><p>Koreksi stok fisik vs sistem</p></div>';
+    html += '<div class="toolbar"><div class="spacer"></div><button class="btn btn-primary" onclick="createNewOpname()">+ Buat Opname Baru</button></div>';
+
+    html += '<div class="card"><div class="overflow-x"><table><thead><tr><th>#</th><th>Tanggal</th><th>Oleh</th><th>Status</th><th>Items</th><th>Selisih</th><th>Aksi</th></tr></thead><tbody>';
+    if (opnames.length === 0) {
+      html += '<tr><td colspan="7">' + emptyHtml('📋', 'Belum ada opname') + '</td></tr>';
+    } else {
+      opnames.forEach(o => {
+        const statusBadge = o.status === 'completed' ? '<span class="badge badge-green">Selesai</span>' : '<span class="badge badge-yellow">Draft</span>';
+        html += '<tr>' +
+          '<td>' + o.id + '</td>' +
+          '<td>' + formatDateTime(o.created_at) + '</td>' +
+          '<td>' + escHtml(o.user_name || '-') + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + (o.total_items || 0) + '</td>' +
+          '<td>' + (o.total_difference || 0) + '</td>' +
+          '<td>' + (o.status === 'draft' ? '<button class="btn btn-sm btn-primary" onclick="openOpnameDetail(' + o.id + ')">📝 Isi</button> <button class="btn btn-sm btn-danger" onclick="deleteOpname(' + o.id + ')">🗑️</button>' : '<button class="btn btn-sm btn-primary" onclick="openOpnameDetail(' + o.id + ')">👁️ Lihat</button>') + '</td></tr>';
+      });
+    }
+    html += '</tbody></table></div></div>';
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+async function createNewOpname() {
+  if (!confirm('Buat opname baru? Semua produk akan dimuat dengan stok sistem saat ini.')) return;
+  try {
+    const data = await apiFetch('/api/stock-opname', { method: 'POST', body: JSON.stringify({ notes: '' }) });
+    showToast('Opname baru dibuat!');
+    openOpnameDetail(data.opname.id);
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function openOpnameDetail(id) {
+  try {
+    const data = await apiFetch('/api/stock-opname/' + id);
+    const o = data.opname;
+    const items = data.items || [];
+    const isCompleted = o.status === 'completed';
+
+    const main = document.getElementById('mainContent');
+    let html = '<div class="page-header"><h1>📋 Opname #' + o.id + '</h1><p>' + (isCompleted ? 'Status: Selesai' : 'Isi stok fisik aktual') + '</p></div>';
+
+    if (!isCompleted) {
+      html += '<div class="toolbar"><button class="btn btn-secondary" onclick="renderStockOpname()">← Kembali</button><div class="spacer"></div><button class="btn btn-primary" onclick="saveOpnameItems(' + o.id + ')">💾 Simpan</button><button class="btn btn-success" style="background:#10b981;color:#fff;margin-left:8px" onclick="completeOpname(' + o.id + ')">✅ Selesaikan</button></div>';
+    } else {
+      html += '<div class="toolbar"><button class="btn btn-secondary" onclick="renderStockOpname()">← Kembali</button></div>';
+    }
+
+    html += '<div class="card"><div class="overflow-x"><table id="opnameTable"><thead><tr><th>Produk</th><th>Stok Sistem</th><th>Stok Fisik</th><th>Selisih</th><th>Catatan</th></tr></thead><tbody>';
+    items.forEach((item, i) => {
+      const diff = (item.actual_stock || 0) - (item.system_stock || 0);
+      const diffColor = diff > 0 ? 'color:#10b981' : diff < 0 ? 'color:#ef4444' : 'color:#6b7280';
+      const diffText = diff > 0 ? '+' + diff : diff.toString();
+      if (isCompleted) {
+        html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.system_stock + '</td><td>' + item.actual_stock + '</td><td style="font-weight:700;' + diffColor + '">' + diffText + '</td><td>' + escHtml(item.notes || '-') + '</td></tr>';
+      } else {
+        html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.system_stock + '</td>' +
+          '<td><input type="number" min="0" value="' + item.actual_stock + '" data-item-id="' + item.id + '" data-system="' + item.system_stock + '" class="opname-input" oninput="updateOpnameDiff(this)" style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></td>' +
+          '<td class="opname-diff" style="font-weight:700;' + diffColor + '">' + diffText + '</td>' +
+          '<td><input type="text" value="' + escHtml(item.notes || '') + '" data-notes-id="' + item.id + '" placeholder="Catatan" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></td></tr>';
+      }
+    });
+    html += '</tbody></table></div></div>';
+    main.innerHTML = html;
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function updateOpnameDiff(input) {
+  const system = Number(input.dataset.system) || 0;
+  const actual = Number(input.value) || 0;
+  const diff = actual - system;
+  const td = input.closest('tr').querySelector('.opname-diff');
+  td.textContent = diff > 0 ? '+' + diff : diff.toString();
+  td.style.color = diff > 0 ? '#10b981' : diff < 0 ? '#ef4444' : '#6b7280';
+}
+
+async function saveOpnameItems(opnameId) {
+  const inputs = document.querySelectorAll('.opname-input');
+  const items = [];
+  inputs.forEach(inp => {
+    const itemId = Number(inp.dataset.itemId);
+    const system = Number(inp.dataset.system) || 0;
+    const actual = Number(inp.value) || 0;
+    const notesInput = document.querySelector('[data-notes-id="' + itemId + '"]');
+    items.push({ id: itemId, system_stock: system, actual_stock: actual, notes: notesInput ? notesInput.value : null });
+  });
+  try {
+    await apiFetch('/api/stock-opname/' + opnameId + '/items', { method: 'PUT', body: JSON.stringify({ items }) });
+    showToast('Data opname berhasil disimpan!');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function completeOpname(opnameId) {
+  // Save first
+  await saveOpnameItems(opnameId);
+  if (!confirm('Selesaikan opname? Stok akan disesuaikan sesuai data fisik. Aksi ini tidak bisa dibatalkan.')) return;
+  try {
+    await apiFetch('/api/stock-opname/' + opnameId + '/complete', { method: 'POST' });
+    showToast('Opname selesai! Stok telah disesuaikan.');
+    renderStockOpname();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function deleteOpname(id) {
+  if (!confirm('Hapus opname ini?')) return;
+  try {
+    await apiFetch('/api/stock-opname/' + id, { method: 'DELETE' });
+    showToast('Opname dihapus');
+    renderStockOpname();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ============ KARTU STOK ============
+async function renderStockCard() {
+  const main = document.getElementById('mainContent');
+  try {
+    const prodData = await apiFetch('/api/products');
+    const products = Array.isArray(prodData) ? prodData : (prodData.products || []);
+
+    let html = '<div class="page-header"><h1>📊 Kartu Stok</h1><p>Histori pergerakan stok per produk</p></div>';
+    html += '<div class="toolbar">';
+    html += '<select id="stockCardProduct" onchange="loadStockCard()" style="min-width:200px"><option value="">-- Pilih Produk --</option>';
+    products.forEach(p => { html += '<option value="' + p.id + '">' + escHtml(p.name) + ' (stok: ' + p.stock + ')</option>'; });
+    html += '</select>';
+    html += '<input type="date" id="stockCardStart" onchange="loadStockCard()" style="margin-left:8px">';
+    html += '<input type="date" id="stockCardEnd" onchange="loadStockCard()" style="margin-left:4px">';
+    html += '</div>';
+    html += '<div id="stockCardContent">' + emptyHtml('📊', 'Pilih produk untuk melihat kartu stok') + '</div>';
+    main.innerHTML = html;
+  } catch (err) {
+    main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+async function loadStockCard() {
+  const productId = document.getElementById('stockCardProduct').value;
+  const container = document.getElementById('stockCardContent');
+  if (!productId) {
+    container.innerHTML = emptyHtml('📊', 'Pilih produk untuk melihat kartu stok');
+    return;
+  }
+  try {
+    let url = '/api/stock-movements?product_id=' + productId;
+    const startDate = document.getElementById('stockCardStart').value;
+    const endDate = document.getElementById('stockCardEnd').value;
+    if (startDate && endDate) url += '&start_date=' + startDate + '&end_date=' + endDate;
+
+    const movements = await apiFetch(url);
+
+    if (movements.length === 0) {
+      container.innerHTML = '<div class="card">' + emptyHtml('📊', 'Belum ada pergerakan stok') + '</div>';
+      return;
+    }
+
+    const typeLabels = { purchase: '📥 Pembelian', sale: '📤 Penjualan', void: '↩️ Void', refund: '↩️ Refund', opname: '📋 Opname', adjustment: '🔧 Penyesuaian', manual: '✏️ Manual' };
+    const typeBadges = { purchase: 'badge-green', sale: 'badge-red', void: 'badge-yellow', refund: 'badge-orange', opname: 'badge-blue', adjustment: 'badge-purple', manual: 'badge-gray' };
+
+    let html = '<div class="card"><div class="overflow-x"><table><thead><tr><th>Tanggal</th><th>Tipe</th><th>Qty</th><th>Sebelum</th><th>Sesudah</th><th>Catatan</th><th>Oleh</th></tr></thead><tbody>';
+    movements.forEach(m => {
+      const qtyColor = m.qty > 0 ? 'color:#10b981' : m.qty < 0 ? 'color:#ef4444' : '';
+      const qtyText = m.qty > 0 ? '+' + m.qty : m.qty.toString();
+      html += '<tr>' +
+        '<td style="white-space:nowrap">' + formatDateTime(m.created_at) + '</td>' +
+        '<td><span class="badge ' + (typeBadges[m.type] || 'badge-gray') + '">' + (typeLabels[m.type] || m.type) + '</span></td>' +
+        '<td style="font-weight:700;' + qtyColor + '">' + qtyText + '</td>' +
+        '<td>' + m.before_stock + '</td>' +
+        '<td><strong>' + m.after_stock + '</strong></td>' +
+        '<td>' + escHtml(m.notes || '-') + '</td>' +
+        '<td>' + escHtml(m.user_name || '-') + '</td></tr>';
+    });
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = '<div class="alert-box alert-warning">Gagal memuat kartu stok: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+// ============ IMPORT PRODUK ============
+async function renderImportProducts() {
+  const main = document.getElementById('mainContent');
+  let html = '<div class="page-header"><h1>📤 Import Produk</h1><p>Upload produk massal via file Excel/CSV</p></div>';
+
+  html += '<div class="card">';
+  html += '<div class="card-header"><h3>📋 Format File</h3></div>';
+  html += '<p style="margin-bottom:12px;color:var(--text-secondary)">Siapkan file Excel (.xlsx) atau CSV dengan kolom berikut:</p>';
+  html += '<div class="overflow-x"><table><thead><tr><th>Kolom</th><th>Wajib</th><th>Contoh</th></tr></thead><tbody>';
+  html += '<tr><td><code>name</code></td><td><span class="badge badge-red">Wajib</span></td><td>Indomie Goreng</td></tr>';
+  html += '<tr><td><code>barcode</code></td><td><span class="badge badge-gray">Opsional</span></td><td>8991234567890</td></tr>';
+  html += '<tr><td><code>price</code></td><td><span class="badge badge-gray">Opsional</span></td><td>3500</td></tr>';
+  html += '<tr><td><code>cost_price</code></td><td><span class="badge badge-gray">Opsional</span></td><td>3000</td></tr>';
+  html += '<tr><td><code>stock</code></td><td><span class="badge badge-gray">Opsional</span></td><td>100</td></tr>';
+  html += '<tr><td><code>min_stock</code></td><td><span class="badge badge-gray">Opsional</span></td><td>10</td></tr>';
+  html += '<tr><td><code>category_name</code></td><td><span class="badge badge-gray">Opsional</span></td><td>Makanan</td></tr>';
+  html += '</tbody></table></div>';
+  html += '</div>';
+
+  html += '<div class="card" style="margin-top:16px">';
+  html += '<div class="card-header"><h3>📤 Upload File</h3></div>';
+  html += '<input type="file" id="importFile" accept=".xlsx,.xls,.csv" onchange="previewImportFile(this)" style="margin-bottom:12px">';
+  html += '<div id="importPreview"></div>';
+  html += '<div id="importActions" style="display:none;margin-top:12px"><button class="btn btn-primary" onclick="executeImport()">🚀 Import Sekarang</button></div>';
+  html += '</div>';
+
+  html += '<div id="importResult"></div>';
+  main.innerHTML = html;
+}
+
+let importData = [];
+
+function previewImportFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const preview = document.getElementById('importPreview');
+  const actions = document.getElementById('importActions');
+  preview.innerHTML = '<div style="padding:16px;text-align:center">⏳ Membaca file...</div>';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = e.target.result;
+      let rows = [];
+
+      if (file.name.endsWith('.csv')) {
+        // Parse CSV
+        const lines = data.split('\n').filter(l => l.trim());
+        if (lines.length < 2) { preview.innerHTML = '<div class="alert-box alert-warning">File kosong atau hanya header.</div>'; return; }
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+        for (let i = 1; i < lines.length; i++) {
+          const vals = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          const obj = {};
+          headers.forEach((h, j) => { obj[h] = vals[j] || ''; });
+          rows.push(obj);
+        }
+      } else {
+        // For XLSX, we parse the ArrayBuffer manually using a simple approach
+        // Since we can't use external libs in browser, we'll tell user to use CSV
+        preview.innerHTML = '<div class="alert-box alert-warning">Untuk saat ini, gunakan format <strong>CSV (.csv)</strong>. Buka file Excel → Save As → CSV.</div>';
+        return;
+      }
+
+      importData = rows.map(r => ({
+        name: r.name || r.nama || '',
+        barcode: r.barcode || r.kode || '',
+        price: Number(r.price || r.harga_jual || r.harga || 0),
+        cost_price: Number(r.cost_price || r.harga_modal || r.modal || 0),
+        stock: Number(r.stock || r.stok || 0),
+        min_stock: Number(r.min_stock || r.stok_minimum || 5),
+        category_name: r.category_name || r.kategori || ''
+      })).filter(r => r.name);
+
+      if (importData.length === 0) {
+        preview.innerHTML = '<div class="alert-box alert-warning">Tidak ada data valid ditemukan.</div>';
+        actions.style.display = 'none';
+        return;
+      }
+
+      let html = '<p style="margin-bottom:8px"><strong>' + importData.length + ' produk</strong> siap diimport:</p>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Nama</th><th>Barcode</th><th>Harga</th><th>Modal</th><th>Stok</th><th>Kategori</th></tr></thead><tbody>';
+      importData.slice(0, 20).forEach(r => {
+        html += '<tr><td>' + escHtml(r.name) + '</td><td>' + escHtml(r.barcode || '-') + '</td><td>' + formatRp(r.price) + '</td><td>' + formatRp(r.cost_price) + '</td><td>' + r.stock + '</td><td>' + escHtml(r.category_name || '-') + '</td></tr>';
+      });
+      if (importData.length > 20) html += '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">... dan ' + (importData.length - 20) + ' produk lainnya</td></tr>';
+      html += '</tbody></table></div>';
+
+      preview.innerHTML = html;
+      actions.style.display = 'block';
+    } catch (err) {
+      preview.innerHTML = '<div class="alert-box alert-warning">Gagal membaca file: ' + escHtml(err.message) + '</div>';
+    }
+  };
+
+  if (file.name.endsWith('.csv')) {
+    reader.readAsText(file);
+  } else {
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+async function executeImport() {
+  if (importData.length === 0) { showToast('Tidak ada data untuk diimport', 'error'); return; }
+  const resultDiv = document.getElementById('importResult');
+  resultDiv.innerHTML = '<div class="alert-box alert-info">⏳ Mengimport ' + importData.length + ' produk...</div>';
+
+  try {
+    const result = await apiFetch('/api/products/import', {
+      method: 'POST',
+      body: JSON.stringify({ products: importData })
+    });
+    let html = '<div class="card" style="margin-top:16px">';
+    html += '<div class="card-header"><h3>✅ Hasil Import</h3></div>';
+    html += '<div class="alert-box alert-info mb-2">' + escHtml(result.message) + '</div>';
+    if (result.errors && result.errors.length > 0) {
+      html += '<div style="max-height:200px;overflow-y:auto;padding:8px;background:#fef3c7;border-radius:8px;font-size:12px">';
+      result.errors.forEach(e => { html += '<div>⚠️ ' + escHtml(e) + '</div>'; });
+      html += '</div>';
+    }
+    html += '</div>';
+    resultDiv.innerHTML = html;
+    showToast('Import selesai: ' + (result.imported || 0) + ' berhasil!');
+    importData = [];
+    document.getElementById('importActions').style.display = 'none';
+  } catch (err) {
+    resultDiv.innerHTML = '<div class="alert-box alert-warning">Gagal import: ' + escHtml(err.message) + '</div>';
   }
 }
 
