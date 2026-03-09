@@ -16,6 +16,41 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve PWA files
+app.get('/manifest.json', (req, res) => {
+  res.json({
+    name: "KasirPro - Sistem POS",
+    short_name: "KasirPro",
+    description: "Aplikasi Point of Sale untuk toko kelontong",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#111D13",
+    theme_color: "#415D43",
+    orientation: "any",
+    icons: [
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }
+    ]
+  });
+});
+
+app.get('/sw.js', (req, res) => {
+  res.set('Content-Type', 'application/javascript');
+  res.send(`const CACHE_NAME='kasirpro-v1';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json'])).then(()=>self.skipWaiting()))});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
+self.addEventListener('fetch',e=>{if(e.request.url.includes('/api/')){e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));return}e.respondWith(caches.match(e.request).then(c=>{const f=fetch(e.request).then(r=>{const cl=r.clone();caches.open(CACHE_NAME).then(ca=>ca.put(e.request,cl));return r}).catch(()=>c);return c||f}))});`);
+});
+
+app.get('/icons/:file', (req, res) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="80" fill="#415D43"/>
+    <text x="256" y="340" text-anchor="middle" font-size="280" font-family="sans-serif" fill="white">🏪</text>
+  </svg>`;
+  res.set('Content-Type', 'image/svg+xml');
+  res.send(svg);
+});
+
 // ============ AUTH & USER ROUTES ============
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -45,6 +80,16 @@ app.get('/api/setup/status', async (req, res) => {
     res.json({ tablesReady, hasUsers });
   } catch (err) {
     res.json({ tablesReady: false, hasUsers: false });
+  }
+});
+
+// Public store info (for login page branding)
+app.get('/api/store-info', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT store_name, store_logo_url FROM settings WHERE id = 1');
+    res.json(rows[0] || { store_name: 'KasirPro', store_logo_url: null });
+  } catch (err) {
+    res.json({ store_name: 'KasirPro', store_logo_url: null });
   }
 });
 
@@ -308,6 +353,8 @@ async function runAutoMigrate() {
     service_charge_rate DECIMAL(5,2) DEFAULT 5.00,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
   await safeExec('Default settings', `INSERT IGNORE INTO settings (id) VALUES (1)`);
+  await safeExec('settings.receipt_footer', `ALTER TABLE settings ADD COLUMN receipt_footer VARCHAR(255) DEFAULT 'Terima kasih telah berbelanja!'`);
+  await safeExec('settings.store_logo_url', `ALTER TABLE settings ADD COLUMN store_logo_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
   // Fix: rename quantity → qty if old column exists
@@ -367,10 +414,27 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('transactions.void_reason', `ALTER TABLE transactions ADD COLUMN void_reason TEXT DEFAULT NULL`);
   await safeExec('transactions.voided_by', `ALTER TABLE transactions ADD COLUMN voided_by VARCHAR(100) DEFAULT NULL`);
   await safeExec('transactions.voided_at', `ALTER TABLE transactions ADD COLUMN voided_at TIMESTAMP NULL DEFAULT NULL`);
+  await safeExec('transactions.tax_amount', `ALTER TABLE transactions ADD COLUMN tax_amount DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.tax_name', `ALTER TABLE transactions ADD COLUMN tax_name VARCHAR(50) DEFAULT NULL`);
+  await safeExec('transactions.tax_rate', `ALTER TABLE transactions ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`);
+  await safeExec('transactions.service_charge', `ALTER TABLE transactions ADD COLUMN service_charge DECIMAL(15,2) DEFAULT 0`);
+  await safeExec('transactions.service_charge_rate', `ALTER TABLE transactions ADD COLUMN service_charge_rate DECIMAL(5,2) DEFAULT 0`);
+  await safeExec('Create settings', `CREATE TABLE IF NOT EXISTS settings (
+    id INT PRIMARY KEY DEFAULT 1, store_name VARCHAR(100) DEFAULT 'KasirPro',
+    store_address TEXT DEFAULT NULL, store_phone VARCHAR(20) DEFAULT NULL,
+    tax_enabled TINYINT(1) DEFAULT 0, tax_name VARCHAR(50) DEFAULT 'PB1',
+    tax_rate DECIMAL(5,2) DEFAULT 10.00, service_charge_enabled TINYINT(1) DEFAULT 0,
+    service_charge_rate DECIMAL(5,2) DEFAULT 5.00,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await safeExec('Default settings', `INSERT IGNORE INTO settings (id) VALUES (1)`);
+  await safeExec('settings.receipt_footer', `ALTER TABLE settings ADD COLUMN receipt_footer VARCHAR(255) DEFAULT 'Terima kasih telah berbelanja!'`);
+  await safeExec('settings.store_logo_url', `ALTER TABLE settings ADD COLUMN store_logo_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('Default categories', `INSERT IGNORE INTO categories (id, name, color) VALUES
     (1,'Makanan','#ef4444'),(2,'Minuman','#3b82f6'),(3,'Snack','#f59e0b'),(4,'Lainnya','#6b7280')`);
   // Fix: rename quantity → qty if old column exists
   await safeExec('transaction_items.quantity→qty', `ALTER TABLE transaction_items CHANGE COLUMN quantity qty INT NOT NULL`);
+  // Add PIN column for kasir login
+  await safeExec('users.pin', `ALTER TABLE users ADD COLUMN pin VARCHAR(255) DEFAULT NULL`);
   res.json({ results });
 });
 
@@ -587,10 +651,10 @@ app.get('/api/settings', authenticateToken, async (req, res) => {
 
 app.put('/api/settings', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { store_name, store_address, store_phone, tax_enabled, tax_name, tax_rate, service_charge_enabled, service_charge_rate } = req.body;
+    const { store_name, store_address, store_phone, tax_enabled, tax_name, tax_rate, service_charge_enabled, service_charge_rate, receipt_footer, store_logo_url } = req.body;
     await pool.query(
-      `UPDATE settings SET store_name=?, store_address=?, store_phone=?, tax_enabled=?, tax_name=?, tax_rate=?, service_charge_enabled=?, service_charge_rate=? WHERE id = 1`,
-      [store_name || 'KasirPro', store_address || null, store_phone || null, tax_enabled ? 1 : 0, tax_name || 'PB1', tax_rate || 10, service_charge_enabled ? 1 : 0, service_charge_rate || 5]
+      `UPDATE settings SET store_name=?, store_address=?, store_phone=?, tax_enabled=?, tax_name=?, tax_rate=?, service_charge_enabled=?, service_charge_rate=?, receipt_footer=?, store_logo_url=? WHERE id = 1`,
+      [store_name || 'KasirPro', store_address || null, store_phone || null, tax_enabled ? 1 : 0, tax_name || 'PB1', tax_rate || 10, service_charge_enabled ? 1 : 0, service_charge_rate || 5, receipt_footer || 'Terima kasih telah berbelanja!', store_logo_url || null]
     );
     const [rows] = await pool.query('SELECT * FROM settings WHERE id = 1');
     res.json({ message: 'Settings berhasil disimpan!', settings: rows[0] });
@@ -845,11 +909,55 @@ app.get('/api/reports/sales', authenticateToken, authorizeRole('admin', 'owner')
       : 0;
     salesSummary[0].avg_transaction = avgTx;
 
+    // Sales by category
+    const [byCategory] = await pool.query(
+      `SELECT COALESCE(c.name, 'Tanpa Kategori') as category_name, 
+              COALESCE(c.color, '#6b7280') as category_color,
+              COUNT(DISTINCT t.id) as transactions,
+              SUM(ti.qty) as total_qty, 
+              COALESCE(SUM(ti.subtotal), 0) as total_revenue
+       FROM transaction_items ti
+       JOIN transactions t ON ti.transaction_id = t.id
+       LEFT JOIN products p ON ti.product_id = p.id
+       LEFT JOIN categories c ON p.category_id = c.id
+       ${tDateFilter}
+       GROUP BY c.id, c.name, c.color ORDER BY total_revenue DESC`, dateParams
+    );
+
+    // Sales by shift
+    const [byShift] = await pool.query(
+      `SELECT s.id as shift_id, s.user_name, 
+              DATE_FORMAT(s.opened_at, '%d/%m/%Y %H:%i') as opened_at,
+              DATE_FORMAT(s.closed_at, '%d/%m/%Y %H:%i') as closed_at,
+              s.status,
+              COUNT(t.id) as transactions,
+              COALESCE(SUM(t.total), 0) as revenue
+       FROM shifts s
+       LEFT JOIN transactions t ON t.user_id = s.user_id 
+         AND t.created_at >= s.opened_at 
+         AND (s.closed_at IS NULL OR t.created_at <= s.closed_at)
+         AND (t.status IS NULL OR t.status = 'completed')
+       ${dateFilter ? 'WHERE ' + dateFilter.replace('WHERE ', '').replace(/created_at/g, 's.opened_at') : ''}
+       GROUP BY s.id ORDER BY s.opened_at DESC LIMIT 20`, dateParams
+    );
+
+    // Hourly sales
+    const [byHour] = await pool.query(
+      `SELECT HOUR(created_at) as hour, 
+              COUNT(*) as transactions,
+              COALESCE(SUM(total), 0) as revenue
+       FROM transactions ${dateFilter}
+       GROUP BY HOUR(created_at) ORDER BY hour ASC`, dateParams
+    );
+
     res.json({
       summary: salesSummary[0],
       per_cashier: perCashier,
       top_products: topProducts,
-      by_payment: byPayment
+      by_payment: byPayment,
+      by_category: byCategory,
+      by_shift: byShift,
+      by_hour: byHour
     });
   } catch (err) {
     console.error('Sales report error:', err);

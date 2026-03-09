@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#415D43">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KasirPro">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>KasirPro - Sistem POS</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -861,6 +867,7 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 @keyframes pinShake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
 </style>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -1001,7 +1008,7 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
       <div class="sidebar-header">
         <div style="display:flex;align-items:center;gap:12px">
           <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#415D43,#709775);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 12px rgba(65,93,67,.4)">🏪</div>
-          <div><h2>KasirPro</h2><small>Point of Sale</small></div>
+          <div><h2 id="sidebarStoreName">KasirPro</h2><small>Point of Sale</small></div>
         </div>
         <div class="notif-wrapper" id="notifWrapper">
           <div class="notif-bell" onclick="toggleNotifPanel()" title="Peringatan Stok">🔔<span class="notif-badge" id="notifBadge" style="display:none">0</span></div>
@@ -1034,6 +1041,19 @@ const API = '';
 let currentUser = null;
 let token = localStorage.getItem('pos_token');
 let currentPage = 'dashboard';
+let storeInfo = { store_name: 'KasirPro', store_logo_url: null };
+// Fetch store branding for login pages
+fetch(API + '/api/store-info').then(r => r.json()).then(info => {
+  storeInfo = info;
+  // Update sidebar store name
+  const sn = document.getElementById('sidebarStoreName');
+  if (sn) sn.textContent = info.store_name || 'KasirPro';
+  // Update mobile header
+  const mobileTitle = document.querySelector('.mobile-header span[style*="font-weight"]');
+  if (mobileTitle) mobileTitle.innerHTML = (info.store_logo_url ? '<img src="'+info.store_logo_url+'" style="height:24px;vertical-align:middle;margin-right:4px"> ' : '🏪 ') + escHtml(info.store_name || 'KasirPro');
+  // Update page title
+  document.title = (info.store_name || 'KasirPro') + ' - Sistem POS';
+}).catch(() => {});
 
 // ============ UTILITIES ============
 function escHtml(str) {
@@ -2139,7 +2159,8 @@ function showReceipt(payload, result) {
   const storeName = appSettings.store_name || 'KasirPro';
   const storeAddr = appSettings.store_address ? '<p style="font-size:10px;margin:2px 0">' + escHtml(appSettings.store_address) + '</p>' : '';
   const storePhone = appSettings.store_phone ? '<p style="font-size:10px;margin:2px 0">📞 ' + escHtml(appSettings.store_phone) + '</p>' : '';
-  html += '<div class="receipt-header"><h3>' + escHtml(storeName) + '</h3>' + storeAddr + storePhone + '<p style="font-size:11px">Struk Pembayaran</p></div>';
+  const logoHtml = appSettings.store_logo_url ? '<img src="' + escHtml(appSettings.store_logo_url) + '" style="max-height:50px;max-width:150px;margin-bottom:4px" alt="">' : '';
+  html += '<div class="receipt-header">' + logoHtml + '<h3>' + escHtml(storeName) + '</h3>' + storeAddr + storePhone + '<p style="font-size:11px">Struk Pembayaran</p></div>';
   html += '<div class="receipt-divider"></div>';
   html += '<div class="receipt-row"><span>No: #' + escHtml(String(txId)) + '</span><span>' + formatDateTime(now) + '</span></div>';
   html += '<div class="receipt-row"><span>Kasir: ' + escHtml(currentUser.name) + '</span></div>';
@@ -2169,7 +2190,7 @@ function showReceipt(payload, result) {
     html += '<div class="receipt-row"><span>Kembalian</span><span>' + formatRp(payload.change) + '</span></div>';
   }
   html += '<div class="receipt-divider"></div>';
-  html += '<div class="receipt-footer">Terima kasih telah berbelanja!<br>Powered by KasirPro</div>';
+  html += '<div class="receipt-footer">' + escHtml(appSettings.receipt_footer || 'Terima kasih telah berbelanja!') + '</div>';
   html += '</div></div>';
   html += '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button><button class="btn btn-primary" onclick="printReceipt()">🖨️ Cetak</button></div>';
 
@@ -2854,6 +2875,8 @@ async function closeShift() {
 let reportPeriod = 'today';
 let reportStartDate = '';
 let reportEndDate = '';
+let lastReportsData = null;
+let lastPLData = null;
 
 async function renderReports() {
   const main = document.getElementById('mainContent');
@@ -2863,6 +2886,7 @@ async function renderReports() {
       reportUrl = '/api/reports/sales?start_date=' + reportStartDate + '&end_date=' + reportEndDate;
     }
     const data = await apiFetch(reportUrl);
+    lastReportsData = data;
     const summary = data.summary || {};
     const perCashier = data.per_cashier || [];
     const topProducts = data.top_products || [];
@@ -2875,7 +2899,7 @@ async function renderReports() {
     [['today','Hari Ini'],['week','Minggu Ini'],['month','Bulan Ini'],['all','Semua'],['custom','📅 Custom']].forEach(([val, label]) => {
       html += '<div class="category-pill' + (reportPeriod === val ? ' active' : '') + '" onclick="changeReportPeriod(\'' + val + '\')">' + label + '</div>';
     });
-    html += '</div></div>';
+    html += '</div><button class="btn btn-primary" onclick="exportReportsExcel()" style="padding:8px 16px;font-size:14px">📥 Export Excel</button></div>';
 
     // Custom date range picker
     if (reportPeriod === 'custom') {
@@ -2919,6 +2943,18 @@ async function renderReports() {
     } else { html += emptyHtml('💳', 'Tidak ada data'); }
     html += '</div>';
 
+    // By category
+    html += '<div class="card"><div class="card-header"><h3>📊 Per Kategori</h3></div>';
+    const byCategory = data.by_category || [];
+    if (byCategory.length > 0) {
+      html += '<div class="overflow-x"><table><thead><tr><th>Kategori</th><th>Transaksi</th><th>Qty</th><th>Revenue</th></tr></thead><tbody>';
+      byCategory.forEach(c => {
+        html += '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + escHtml(c.category_color) + ';margin-right:6px"></span><strong>' + escHtml(c.category_name) + '</strong></td><td>' + (c.transactions || 0) + '</td><td>' + (c.total_qty || 0) + '</td><td>' + formatRp(c.total_revenue) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else { html += emptyHtml('📊', 'Tidak ada data kategori'); }
+    html += '</div>';
+
     html += '</div>'; // end dash-grid
 
     // Top products
@@ -2931,6 +2967,43 @@ async function renderReports() {
       html += '</tbody></table></div>';
     } else { html += emptyHtml('🏆', 'Tidak ada data'); }
     html += '</div>';
+
+    // By shift
+    const byShift = data.by_shift || [];
+    if (byShift.length > 0) {
+      html += '<div class="card mt-4"><div class="card-header"><h3>⏰ Laporan per Shift</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Kasir</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Transaksi</th><th>Revenue</th></tr></thead><tbody>';
+      byShift.forEach(s => {
+        const statusBadge = s.status === 'open' 
+          ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Buka</span>'
+          : '<span style="background:#e2e8f0;color:#64748b;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Tutup</span>';
+        html += '<tr><td><strong>' + escHtml(s.user_name) + '</strong></td><td>' + escHtml(s.opened_at || '-') + '</td><td>' + escHtml(s.closed_at || '-') + '</td><td>' + statusBadge + '</td><td>' + (s.transactions || 0) + '</td><td>' + formatRp(s.revenue) + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    }
+
+    // Hourly analysis
+    const byHour = data.by_hour || [];
+    if (byHour.length > 0) {
+      html += '<div class="card mt-4"><div class="card-header"><h3>🕐 Penjualan per Jam</h3></div>';
+      // Find peak hour
+      const peakHour = byHour.reduce((max, h) => h.revenue > max.revenue ? h : max, byHour[0]);
+      html += '<div style="padding:12px 16px;background:linear-gradient(135deg,rgba(65,93,67,.05),rgba(113,151,117,.05));border-bottom:1px solid var(--border)">';
+      html += '<span style="font-size:13px">🔥 <strong>Peak Hour:</strong> ' + String(peakHour.hour).padStart(2,'0') + ':00 — ' + formatRp(peakHour.revenue) + ' (' + peakHour.transactions + ' transaksi)</span></div>';
+      // Bar chart using div bars
+      const maxRev = Math.max(...byHour.map(h => Number(h.revenue)));
+      html += '<div style="padding:16px;overflow-x:auto"><div style="display:flex;align-items:flex-end;gap:4px;height:160px;min-width:' + (byHour.length * 32) + 'px">';
+      byHour.forEach(h => {
+        const pct = maxRev > 0 ? (Number(h.revenue) / maxRev * 100) : 0;
+        const isPeak = h.hour === peakHour.hour;
+        html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">';
+        html += '<div style="font-size:10px;color:#64748b">' + formatRp(h.revenue).replace('Rp ','') + '</div>';
+        html += '<div style="width:100%;max-width:28px;height:' + Math.max(pct, 3) + '%;background:' + (isPeak ? 'linear-gradient(180deg,#415D43,#709775)' : '#d5e5d6') + ';border-radius:4px 4px 0 0;transition:height .3s"></div>';
+        html += '<div style="font-size:10px;font-weight:' + (isPeak ? '700' : '500') + ';color:' + (isPeak ? '#415D43' : '#94a3b8') + '">' + String(h.hour).padStart(2,'0') + '</div>';
+        html += '</div>';
+      });
+      html += '</div></div></div>';
+    }
 
     // Transaction list
     let txUrl = '/api/transactions?start_date=&end_date=';
@@ -2982,6 +3055,7 @@ async function renderProfitLoss() {
       plUrl = '/api/reports/profit-loss?start_date=' + plStartDate + '&end_date=' + plEndDate;
     }
     const data = await apiFetch(plUrl);
+    lastPLData = data;
     const s = data.summary || {};
     const byProduct = data.by_product || [];
     const expByCat = data.expenses_by_category || [];
@@ -2994,7 +3068,7 @@ async function renderProfitLoss() {
     [['today','Hari Ini'],['week','7 Hari'],['month','30 Hari'],['all','Semua'],['custom','📅 Custom']].forEach(([val, label]) => {
       html += '<div class="category-pill' + (plPeriod === val ? ' active' : '') + '" onclick="changePLPeriod(\'' + val + '\')">' + label + '</div>';
     });
-    html += '</div></div>';
+    html += '</div><button class="btn btn-primary" onclick="exportProfitLossExcel()" style="padding:8px 16px;font-size:14px">📥 Export Excel</button></div>';
 
     // Custom date range picker
     if (plPeriod === 'custom') {
@@ -3123,6 +3197,114 @@ function applyPLDateRange() {
   renderProfitLoss();
 }
 
+function exportReportsExcel() {
+  if (!lastReportsData) { showToast('Tidak ada data untuk diekspor', 'warning'); return; }
+  try {
+    const wb = XLSX.utils.book_new();
+    const data = lastReportsData;
+    const summary = data.summary || {};
+
+    // Sheet 1: Ringkasan
+    const summaryRows = [
+      { Metrik: 'Total Pendapatan', Nilai: summary.total_revenue || 0 },
+      { Metrik: 'Total Transaksi', Nilai: summary.total_transactions || 0 },
+      { Metrik: 'Rata-rata Transaksi', Nilai: summary.avg_transaction || 0 },
+      { Metrik: 'Total Diskon', Nilai: summary.total_discount || 0 }
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Ringkasan');
+
+    // Sheet 2: Per Kasir
+    const cashierRows = (data.per_cashier || []).map(c => ({
+      Kasir: c.user_name || c.name || 'Kasir',
+      Transaksi: c.transactions || c.total_transactions || 0,
+      Revenue: c.revenue || c.total_revenue || 0
+    }));
+    if (cashierRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cashierRows), 'Per Kasir');
+
+    // Sheet 3: Per Metode Bayar
+    const payRows = (data.by_payment || []).map(p => ({
+      Metode: p.payment_method || p.method || '-',
+      Jumlah: p.count || p.transactions || 0,
+      Total: p.total || p.revenue || 0
+    }));
+    if (payRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payRows), 'Per Metode Bayar');
+
+    // Sheet 4: Produk Terlaris
+    const prodRows = (data.top_products || []).map((p, i) => ({
+      No: i + 1,
+      Produk: p.name || p.product_name || '-',
+      Terjual: p.total_qty || p.qty || 0,
+      Revenue: p.total_revenue || p.revenue || 0
+    }));
+    if (prodRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodRows), 'Produk Terlaris');
+
+    // Sheet 5: Daftar Transaksi (from cached txs if available)
+    const byCategory = (data.by_category || []).map(c => ({
+      Kategori: c.category_name || '-',
+      Transaksi: c.transactions || 0,
+      Qty: c.total_qty || 0,
+      Revenue: c.total_revenue || 0
+    }));
+    if (byCategory.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(byCategory), 'Per Kategori');
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, 'Laporan-Penjualan-' + today + '.xlsx');
+    showToast('Laporan berhasil diekspor!', 'success');
+  } catch (err) { showToast('Gagal export: ' + err.message, 'error'); }
+}
+
+function exportProfitLossExcel() {
+  if (!lastPLData) { showToast('Tidak ada data untuk diekspor', 'warning'); return; }
+  try {
+    const wb = XLSX.utils.book_new();
+    const data = lastPLData;
+    const s = data.summary || {};
+
+    // Sheet 1: Ringkasan Laba Rugi
+    const summaryRows = [
+      { Keterangan: 'Pendapatan', Nilai: s.total_revenue || 0 },
+      { Keterangan: 'Diskon', Nilai: -(s.total_discount || 0) },
+      { Keterangan: 'HPP (Harga Pokok Penjualan)', Nilai: -(s.total_cogs || 0) },
+      { Keterangan: 'Laba Kotor', Nilai: s.gross_profit || 0 },
+      { Keterangan: 'Margin (%)', Nilai: (s.margin_percent || 0) + '%' },
+      { Keterangan: 'Total Pengeluaran', Nilai: -(s.total_expenses || 0) },
+      { Keterangan: 'Laba Bersih', Nilai: s.net_profit || 0 }
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Ringkasan Laba Rugi');
+
+    // Sheet 2: Profit per Produk
+    const prodRows = (data.by_product || []).map(p => ({
+      Produk: p.product_name || '-',
+      Qty: p.total_qty || 0,
+      Penjualan: p.total_sales || 0,
+      Modal: p.total_cost || 0,
+      Profit: p.profit || 0,
+      'Margin (%)': Number(p.total_sales) > 0 ? ((Number(p.profit) / Number(p.total_sales)) * 100).toFixed(1) + '%' : '0%'
+    }));
+    if (prodRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodRows), 'Profit per Produk');
+
+    // Sheet 3: Pengeluaran per Kategori
+    const expRows = (data.expenses_by_category || []).map(e => ({
+      Kategori: e.category || 'Lainnya',
+      Total: e.total || 0
+    }));
+    if (expRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expRows), 'Pengeluaran per Kategori');
+
+    // Sheet 4: Trend Harian
+    const trendRows = (data.daily_trend || []).map(d => ({
+      Tanggal: d.date || '-',
+      Pendapatan: d.revenue || 0,
+      HPP: d.cogs || 0,
+      'Laba Kotor': (Number(d.revenue) || 0) - (Number(d.cogs) || 0)
+    }));
+    if (trendRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trendRows), 'Trend Harian');
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, 'Laba-Rugi-' + today + '.xlsx');
+    showToast('Laporan Laba Rugi berhasil diekspor!', 'success');
+  } catch (err) { showToast('Gagal export: ' + err.message, 'error'); }
+}
+
 async function showTransactionDetail(id) {
   try {
     const data = await apiFetch('/api/transactions/' + id);
@@ -3130,7 +3312,11 @@ async function showTransactionDetail(id) {
     const items = data.items || tx.items || [];
     let html = '<div class="modal-header"><h3>🧾 Detail Transaksi #' + escHtml(String(tx.id)) + '</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>';
     html += '<div class="modal-body"><div class="receipt">';
-    html += '<div class="receipt-header"><h3>KasirPro</h3></div>';
+    const dtStoreName = appSettings.store_name || 'KasirPro';
+    const dtLogoHtml = appSettings.store_logo_url ? '<img src="' + escHtml(appSettings.store_logo_url) + '" style="max-height:50px;max-width:150px;margin-bottom:4px" alt="">' : '';
+    const dtStoreAddr = appSettings.store_address ? '<p style="font-size:10px;margin:2px 0">' + escHtml(appSettings.store_address) + '</p>' : '';
+    const dtStorePhone = appSettings.store_phone ? '<p style="font-size:10px;margin:2px 0">📞 ' + escHtml(appSettings.store_phone) + '</p>' : '';
+    html += '<div class="receipt-header">' + dtLogoHtml + '<h3>' + escHtml(dtStoreName) + '</h3>' + dtStoreAddr + dtStorePhone + '</div>';
     html += '<div class="receipt-divider"></div>';
     html += '<div class="receipt-row"><span>Tanggal</span><span>' + formatDateTime(tx.created_at || tx.date) + '</span></div>';
     html += '<div class="receipt-row"><span>Kasir</span><span>' + escHtml(tx.cashier_name || tx.user_name || '-') + '</span></div>';
@@ -3334,6 +3520,13 @@ async function renderSettings() {
         <div class="form-group"><label>Rate Service (%)</label><input id="sServiceRate" type="number" step="0.5" min="0" max="100" value="${s.service_charge_rate||5}"></div>
         <button class="btn" onclick="saveSettings()" style="width:100%;margin-top:8px">💾 Simpan Pengaturan</button>
       </div>
+      <div class="card" style="flex:1;min-width:300px">
+        <h3 style="margin-bottom:16px">🧾 Struk & Branding</h3>
+        <div class="form-group"><label>Logo Toko (URL gambar)</label><input id="sLogoUrl" value="${escHtml(s.store_logo_url||'')}" placeholder="https://example.com/logo.png"></div>
+        <div id="logoPreview" style="text-align:center;margin-bottom:12px">${s.store_logo_url ? '<img src="'+escHtml(s.store_logo_url)+'" style="max-height:80px;max-width:200px;border-radius:8px;border:1px solid var(--border)">' : '<span style="color:#94a3b8;font-size:13px">Belum ada logo</span>'}</div>
+        <div class="form-group"><label>Footer Struk</label><input id="sReceiptFooter" value="${escHtml(s.receipt_footer||'Terima kasih telah berbelanja!')}" placeholder="Terima kasih telah berbelanja!"></div>
+        <p style="font-size:12px;color:#94a3b8;margin-top:8px">💡 Logo akan muncul di halaman login dan struk</p>
+      </div>
     </div>`;
   } catch(err) {
     main.innerHTML = '<div class="card"><p style="color:#ef4444">Gagal memuat settings: ' + escHtml(err.message) + '</p></div>';
@@ -3351,6 +3544,8 @@ async function saveSettings() {
       tax_rate: parseFloat(document.getElementById('sTaxRate').value) || 0,
       service_charge_enabled: document.getElementById('sServiceEnabled').checked,
       service_charge_rate: parseFloat(document.getElementById('sServiceRate').value) || 0,
+      receipt_footer: document.getElementById('sReceiptFooter').value,
+      store_logo_url: document.getElementById('sLogoUrl').value,
     };
     const res = await apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(data) });
     appSettings = res.settings;
@@ -3423,6 +3618,11 @@ document.addEventListener('keydown', (e) => {
     if (el) el.focus();
   }
 });
+
+// Register PWA Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 // ============ INIT ============
 checkAuth();
