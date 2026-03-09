@@ -1473,8 +1473,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 // ============ NAVIGATION ============
 const NAV_ITEMS = [
   { id: 'dashboard', icon: '📊', label: 'Dashboard', roles: ['owner','admin'] },
-  { id: 'pos', icon: '🛒', label: 'Kasir', roles: ['owner','admin','kasir'] },
-  { id: 'history', icon: '🧾', label: 'Histori Transaksi', roles: ['kasir'] },
+  { id: 'pos', icon: '🛒', label: 'Kasir', roles: ['admin','kasir'] },
+  { id: 'history', icon: '🧾', label: 'Histori Transaksi', roles: ['owner','kasir'] },
   { id: 'products', icon: '📦', label: 'Kelola Produk', roles: ['owner','admin'] },
   { id: 'categories', icon: '🏷️', label: 'Kategori', roles: ['owner','admin'] },
   { id: 'customers', icon: '👥', label: 'Pelanggan', roles: ['owner','admin'] },
@@ -1540,10 +1540,13 @@ function toggleSidebar() {
 async function renderHistory() {
   const main = document.getElementById('mainContent');
   try {
-    const data = await apiFetch('/api/my-transactions');
+    const isOwner = currentUser && currentUser.role === 'owner';
+    const endpoint = isOwner ? '/api/transactions' : '/api/my-transactions';
+    const data = await apiFetch(endpoint);
     const txs = data.transactions || data || [];
 
-    let html = '<div class="page-header"><h1>🧾 Histori Transaksi</h1><p>Riwayat transaksi Anda</p></div>';
+    let html = '<div class="page-header"><h1>🧾 Histori Transaksi</h1><p>' +
+      (isOwner ? 'Semua transaksi dari seluruh kasir' : 'Riwayat transaksi Anda') + '</p></div>';
 
     // Summary
     let totalRevenue = 0;
@@ -1555,12 +1558,15 @@ async function renderHistory() {
 
     if (txs.length > 0) {
       html += '<div class="card mt-4"><div class="card-header"><h3>📋 Daftar Transaksi</h3></div>';
-      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Total</th><th>Metode</th></tr></thead><tbody>';
+      html += '<div class="overflow-x"><table><thead><tr><th>ID</th><th>Tanggal</th>';
+      if (isOwner) html += '<th>Kasir</th>';
+      html += '<th>Pelanggan</th><th>Total</th><th>Metode</th></tr></thead><tbody>';
       txs.forEach(tx => {
         html += '<tr class="clickable-row" onclick="showTransactionDetail(' + tx.id + ')">' +
           '<td>#' + tx.id + '</td>' +
-          '<td>' + formatDateTime(tx.created_at || tx.date) + '</td>' +
-          '<td>' + escHtml(tx.customer_name || 'Umum') + '</td>' +
+          '<td>' + formatDateTime(tx.created_at || tx.date) + '</td>';
+        if (isOwner) html += '<td><span style="background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600;">👤 ' + escHtml(tx.user_name || 'Unknown') + '</span></td>';
+        html += '<td>' + escHtml(tx.customer_name || 'Umum') + '</td>' +
           '<td><strong>' + formatRp(tx.total) + '</strong></td>' +
           '<td>' + payMethodBadge(tx.payment_method) + '</td></tr>';
       });
