@@ -3579,6 +3579,7 @@ async function renderProfitLoss() {
     const s = data.summary || {};
     const byProduct = data.by_product || [];
     const expByCat = data.expenses_by_category || [];
+    const purchBySupp = data.purchases_by_supplier || [];
     const trend = (data.daily_trend || []).reverse();
 
     let html = '<div class="page-header"><h1>💹 Laporan Laba Rugi</h1><p>Analisis profitabilitas bisnis Anda</p></div>';
@@ -3615,6 +3616,19 @@ async function renderProfitLoss() {
     html += '</div>';
     html += '</div>';
 
+    // Cash Flow / Arus Kas summary
+    if (Number(s.total_stock_purchases) > 0 || Number(s.total_expenses) > 0) {
+      const isCashPositive = (s.net_cash_flow || 0) >= 0;
+      html += '<div class="card mt-4" style="border-left:4px solid ' + (isCashPositive ? '#10b981' : '#ef4444') + '">';
+      html += '<div class="card-header"><h3>💰 Arus Kas (Cash Flow)</h3></div>';
+      html += '<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;text-align:center">';
+      html += '<div><div style="font-size:13px;color:#94a3b8;margin-bottom:4px">💵 Uang Masuk</div><div style="font-size:20px;font-weight:800;color:#10b981">' + formatRp(s.cash_in) + '</div><div style="font-size:12px;color:#94a3b8">dari penjualan</div></div>';
+      html += '<div><div style="font-size:13px;color:#94a3b8;margin-bottom:4px">📦 Pembelian Stok</div><div style="font-size:20px;font-weight:800;color:#d97706">' + formatRp(s.total_stock_purchases) + '</div><div style="font-size:12px;color:#94a3b8">ke supplier</div></div>';
+      html += '<div><div style="font-size:13px;color:#94a3b8;margin-bottom:4px">💸 Pengeluaran Lain</div><div style="font-size:20px;font-weight:800;color:#ef4444">' + formatRp(s.total_expenses) + '</div><div style="font-size:12px;color:#94a3b8">operasional</div></div>';
+      html += '<div><div style="font-size:13px;color:#94a3b8;margin-bottom:4px">' + (isCashPositive ? '✅' : '⚠️') + ' Arus Kas Bersih</div><div style="font-size:22px;font-weight:800;color:' + (isCashPositive ? '#10b981' : '#ef4444') + '">' + (isCashPositive ? '+' : '') + formatRp(s.net_cash_flow) + '</div><div style="font-size:12px;color:#94a3b8">masuk - keluar</div></div>';
+      html += '</div></div>';
+    }
+
     // Detail breakdown
     html += '<div class="card mt-4"><div class="card-header"><h3>📋 Rincian Laba Rugi</h3></div>';
     html += '<div style="padding:16px"><table style="width:100%;border-collapse:collapse">';
@@ -3624,7 +3638,7 @@ async function renderProfitLoss() {
     if (Number(s.total_service) > 0) html += '<tr style="color:#999"><td style="padding:6px 0 6px 20px">Termasuk Service</td><td style="text-align:right">' + formatRp(s.total_service) + '</td></tr>';
     html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">📦 HPP (Harga Pokok Penjualan)</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#d97706">-' + formatRp(s.total_cogs) + '</td></tr>';
     html += '<tr style="border-bottom:2px solid var(--primary);background:rgba(65,93,67,0.05)"><td style="padding:12px 0;font-weight:800;font-size:16px">📊 LABA KOTOR</td><td style="text-align:right;padding:12px 0;font-weight:800;font-size:16px;color:#10b981">' + formatRp(s.gross_profit) + ' <small style="font-weight:500">(' + (s.margin_percent||0) + '%)</small></td></tr>';
-    html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">💸 PENGELUARAN</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#ef4444">-' + formatRp(s.total_expenses) + '</td></tr>';
+    html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">💸 PENGELUARAN OPERASIONAL</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#ef4444">-' + formatRp(s.total_expenses) + '</td></tr>';
     
     // Expense breakdown
     expByCat.forEach(e => {
@@ -3632,6 +3646,18 @@ async function renderProfitLoss() {
     });
     
     html += '<tr style="background:' + (isProfit ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)') + '"><td style="padding:14px 0;font-weight:800;font-size:18px">' + (isProfit ? '🎉' : '😞') + ' LABA BERSIH</td><td style="text-align:right;padding:14px 0;font-weight:800;font-size:18px;color:' + (isProfit ? '#10b981' : '#ef4444') + '">' + (isProfit ? '' : '-') + formatRp(Math.abs(s.net_profit||0)) + '</td></tr>';
+
+    // Stock Purchases section in rincian
+    if (Number(s.total_stock_purchases) > 0) {
+      html += '<tr style="border-top:3px solid var(--border)"><td colspan="2" style="padding:8px 0 4px;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">Informasi Arus Kas</td></tr>';
+      html += '<tr style="border-bottom:2px solid var(--border)"><td style="padding:10px 0;font-weight:700;font-size:15px">📦 PEMBELIAN STOK</td><td style="text-align:right;padding:10px 0;font-weight:700;font-size:15px;color:#d97706">-' + formatRp(s.total_stock_purchases) + '</td></tr>';
+      purchBySupp.forEach(p => {
+        html += '<tr style="color:#999"><td style="padding:4px 0 4px 20px">' + escHtml(p.supplier_name || 'Tanpa Supplier') + ' <small>(' + p.total_invoices + ' invoice)</small></td><td style="text-align:right">-' + formatRp(p.total) + '</td></tr>';
+      });
+      const isCashPos = (s.net_cash_flow || 0) >= 0;
+      html += '<tr style="background:' + (isCashPos ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)') + '"><td style="padding:12px 0;font-weight:700;font-size:16px">💰 ARUS KAS BERSIH</td><td style="text-align:right;padding:12px 0;font-weight:700;font-size:16px;color:' + (isCashPos ? '#10b981' : '#ef4444') + '">' + (isCashPos ? '+' : '') + formatRp(s.net_cash_flow || 0) + '</td></tr>';
+    }
+
     html += '</table></div></div>';
 
     // Profit by product
@@ -3667,6 +3693,18 @@ async function renderProfitLoss() {
     } else { html += emptyHtml('💸', 'Tidak ada pengeluaran'); }
     html += '</div>';
     html += '</div>'; // end dash-grid
+
+    // Purchases by supplier
+    if (purchBySupp.length > 0) {
+      html += '<div class="card mt-4"><div class="card-header"><h3>📦 Pembelian Stok per Supplier</h3></div>';
+      html += '<div class="overflow-x"><table><thead><tr><th>Supplier</th><th>Jumlah Invoice</th><th>Total Pembelian</th><th>%</th></tr></thead><tbody>';
+      const totalPurch = Number(s.total_stock_purchases) || 1;
+      purchBySupp.forEach(p => {
+        const pct = ((Number(p.total) / totalPurch) * 100).toFixed(1);
+        html += '<tr><td><strong>' + escHtml(p.supplier_name || 'Tanpa Supplier') + '</strong></td><td>' + p.total_invoices + '</td><td>' + formatRp(p.total) + '</td><td>' + pct + '%</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    }
 
     // Daily trend
     if (trend.length > 1) {

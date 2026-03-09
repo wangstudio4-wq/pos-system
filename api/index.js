@@ -1204,6 +1204,29 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
        GROUP BY category ORDER BY total DESC`
     );
 
+    // Stock Purchases (Pembelian Stok dari supplier)
+    let spDateFilter = '';
+    if (start_date && end_date) {
+      spDateFilter = `AND sp.created_at >= '${start_date} 00:00:00' AND sp.created_at <= '${end_date} 23:59:59'`;
+    } else if (period === 'today') {
+      spDateFilter = 'AND DATE(sp.created_at) = CURDATE()';
+    } else if (period === 'week') {
+      spDateFilter = 'AND sp.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
+    } else if (period === 'month') {
+      spDateFilter = 'AND sp.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+    }
+
+    const [stockPurchases] = await pool.query(
+      `SELECT COALESCE(SUM(sp.total_amount), 0) as total_purchases
+       FROM stock_purchases sp WHERE 1=1 ${spDateFilter}`
+    );
+
+    const [purchasesBySupplier] = await pool.query(
+      `SELECT sp.supplier_name, COUNT(*) as total_invoices, COALESCE(SUM(sp.total_amount), 0) as total
+       FROM stock_purchases sp WHERE 1=1 ${spDateFilter}
+       GROUP BY sp.supplier_name ORDER BY total DESC`
+    );
+
     // Daily trend (last 30 days or period)
     const [dailyTrend] = await pool.query(
       `SELECT DATE(t.created_at) as date,
@@ -1222,8 +1245,12 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
     const totalRevenue = Number(revenue[0].total_revenue) || 0;
     const totalCogs = Number(cogs[0].total_cogs) || 0;
     const totalExpenses = Number(expenses[0].total_expenses) || 0;
+    const totalStockPurchases = Number(stockPurchases[0].total_purchases) || 0;
     const grossProfit = totalRevenue - totalCogs;
     const netProfit = grossProfit - totalExpenses;
+    const cashIn = totalRevenue;
+    const cashOut = totalStockPurchases + totalExpenses;
+    const netCashFlow = cashIn - cashOut;
 
     res.json({
       summary: {
@@ -1231,7 +1258,11 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
         total_cogs: totalCogs,
         gross_profit: grossProfit,
         total_expenses: totalExpenses,
+        total_stock_purchases: totalStockPurchases,
         net_profit: netProfit,
+        net_cash_flow: netCashFlow,
+        cash_in: cashIn,
+        cash_out: cashOut,
         total_transactions: revenue[0].total_transactions || 0,
         total_tax: Number(revenue[0].total_tax) || 0,
         total_service: Number(revenue[0].total_service) || 0,
@@ -1240,6 +1271,7 @@ app.get('/api/reports/profit-loss', authenticateToken, authorizeRole('admin', 'o
       },
       by_product: byProduct,
       expenses_by_category: expByCategory,
+      purchases_by_supplier: purchasesBySupplier,
       daily_trend: dailyTrend
     });
   } catch (err) {
