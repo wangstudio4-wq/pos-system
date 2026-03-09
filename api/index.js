@@ -392,6 +392,8 @@ async function runAutoMigrate() {
     description TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL,
     user_id INT NOT NULL, user_name VARCHAR(100) NOT NULL,
     date DATE DEFAULT (CURRENT_DATE), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('products.barcode', `ALTER TABLE products ADD COLUMN barcode VARCHAR(50) DEFAULT NULL`);
+  await safeExec('products.barcode_unique', `ALTER TABLE products ADD UNIQUE INDEX idx_barcode (barcode)`);
   await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
   await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
@@ -505,6 +507,8 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
     description TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL,
     user_id INT NOT NULL, user_name VARCHAR(100) NOT NULL,
     date DATE DEFAULT (CURRENT_DATE), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await safeExec('products.barcode', `ALTER TABLE products ADD COLUMN barcode VARCHAR(50) DEFAULT NULL`);
+  await safeExec('products.barcode_unique', `ALTER TABLE products ADD UNIQUE INDEX idx_barcode (barcode)`);
   await safeExec('products.category_id', `ALTER TABLE products ADD COLUMN category_id INT DEFAULT NULL`);
   await safeExec('products.image_url', `ALTER TABLE products ADD COLUMN image_url VARCHAR(500) DEFAULT NULL`);
   await safeExec('products.min_stock', `ALTER TABLE products ADD COLUMN min_stock INT DEFAULT 5`);
