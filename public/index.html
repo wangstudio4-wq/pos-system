@@ -1016,7 +1016,7 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
         <div class="notif-wrapper" id="notifWrapper">
           <div class="notif-bell" onclick="toggleNotifPanel()" title="Peringatan Stok">🔔<span class="notif-badge" id="notifBadge" style="display:none">0</span></div>
           <div class="notif-panel" id="notifPanel">
-            <div class="notif-panel-header">⚠️ Peringatan Stok</div>
+            <div class="notif-panel-header" id="notifPanelHeader">⚠️ Peringatan</div>
             <div class="notif-panel-body" id="notifBody"><div class="notif-empty">Semua stok aman ✅</div></div>
           </div>
         </div>
@@ -1400,8 +1400,18 @@ document.addEventListener('click', function(e) {
   }
 });
 
+let expiringData = [];
+
 async function loadLowStockNotifications() {
   try {
+    // Fetch expiring products
+    try {
+      const expRes = await fetch(API + '/api/products/expiring?days=30', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (expRes.ok) { expiringData = await expRes.json(); }
+    } catch(e) { expiringData = []; }
+    // Fetch low stock
     const res = await fetch(API + '/api/products/low-stock', {
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -1414,32 +1424,66 @@ async function loadLowStockNotifications() {
 function updateNotifBadge() {
   const badge = document.getElementById('notifBadge');
   const body = document.getElementById('notifBody');
+  const header = document.getElementById('notifPanelHeader');
   if (!badge || !body) return;
 
-  const count = lowStockData.length;
-  if (count === 0) {
+  const stockCount = (lowStockData || []).length;
+  const expCount = (expiringData || []).filter(p => p.urgency === 'expired' || p.urgency === 'kritis').length;
+  const totalCount = stockCount + expCount;
+
+  if (totalCount === 0) {
     badge.style.display = 'none';
-    body.innerHTML = '<div class="notif-empty">Semua stok aman ✅</div>';
+    body.innerHTML = '<div class="notif-empty">Semua stok & produk aman \u2705</div>';
+    if (header) header.textContent = '\u26A0\uFE0F Peringatan';
     return;
   }
 
   badge.style.display = 'flex';
-  badge.textContent = count > 99 ? '99+' : count;
+  badge.textContent = totalCount > 99 ? '99+' : totalCount;
+  if (header) header.textContent = '\u26A0\uFE0F Peringatan (' + totalCount + ')';
 
   let html = '';
-  lowStockData.forEach(p => {
-    const isOut = p.stock === 0;
-    const iconClass = isOut ? 'danger' : 'warning';
-    const icon = isOut ? '🚫' : '⚠️';
-    const status = isOut ? 'HABIS' : 'Sisa ' + p.stock;
-    html += '<div class="notif-item">' +
-      '<div class="notif-item-icon ' + iconClass + '">' + icon + '</div>' +
-      '<div class="notif-item-info">' +
-        '<div class="notif-item-name">' + escHtml(p.name) + '</div>' +
-        '<div class="notif-item-detail">' + status + ' — min: ' + (p.min_stock || 0) + '</div>' +
-      '</div>' +
-    '</div>';
-  });
+
+  // Expiring products (expired + kritis only in bell)
+  const criticalExpiring = (expiringData || []).filter(p => p.urgency === 'expired' || p.urgency === 'kritis');
+  if (criticalExpiring.length > 0) {
+    html += '<div style="padding:6px 12px 2px;font-size:11px;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:.5px">\uD83D\uDCC5 Kadaluarsa</div>';
+    criticalExpiring.forEach(p => {
+      const isExp = p.urgency === 'expired';
+      const daysLabel = isExp ? 'Sudah expired ' + Math.abs(p.days_until_expire) + ' hari lalu' : 'Habis ' + p.days_until_expire + ' hari lagi';
+      html += '<div class="notif-item">' +
+        '<div class="notif-item-icon danger">' + (isExp ? '\u2620\uFE0F' : '\uD83D\uDCC5') + '</div>' +
+        '<div class="notif-item-info">' +
+          '<div class="notif-item-name">' + escHtml(p.name) + '</div>' +
+          '<div class="notif-item-detail">' + daysLabel + '</div>' +
+        '</div></div>';
+    });
+  }
+
+  // Low stock products
+  if (stockCount > 0) {
+    html += '<div style="padding:6px 12px 2px;font-size:11px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.5px">\uD83D\uDCE6 Stok Menipis</div>';
+    (lowStockData || []).forEach(p => {
+      const isOut = p.stock === 0;
+      const iconClass = isOut ? 'danger' : 'warning';
+      const icon = isOut ? '\uD83D\uDEAB' : '\u26A0\uFE0F';
+      const status = isOut ? 'HABIS' : 'Sisa ' + p.stock;
+      html += '<div class="notif-item">' +
+        '<div class="notif-item-icon ' + iconClass + '">' + icon + '</div>' +
+        '<div class="notif-item-info">' +
+          '<div class="notif-item-name">' + escHtml(p.name) + '</div>' +
+          '<div class="notif-item-detail">' + status + ' \u2014 min: ' + (p.min_stock || 0) + '</div>' +
+        '</div></div>';
+    });
+  }
+
+  if (criticalExpiring.length > 0 || stockCount > 0) {
+    html += '<div style="padding:8px 12px;border-top:1px solid var(--border);display:flex;gap:8px">';
+    if (criticalExpiring.length > 0) html += '<button class="btn btn-sm" style="flex:1;font-size:11px;background:#ef4444;color:#fff" onclick="showPage(\'expiredtracking\');toggleNotifPanel()">\uD83D\uDCC5 Lihat Expired</button>';
+    if (stockCount > 0) html += '<button class="btn btn-sm" style="flex:1;font-size:11px" onclick="showPage(\'restock\');toggleNotifPanel()">\uD83D\uDD14 Restock Alert</button>';
+    html += '</div>';
+  }
+
   body.innerHTML = html;
 }
 
@@ -1523,6 +1567,8 @@ const NAV_ITEMS = [
   { id: 'stockcard', icon: '📊', label: 'Kartu Stok', roles: ['owner','admin'] },
   { id: 'comparison', icon: '⚖️', label: 'Perbandingan Periode', roles: ['owner','admin'] },
   { id: 'slowmoving', icon: '🐌', label: 'Produk Slow Moving', roles: ['owner','admin'] },
+  { id: 'expiredtracking', icon: '📅', label: 'Expired Tracking', roles: ['owner','admin'] },
+  { id: 'restock', icon: '🔔', label: 'Restock Alert', roles: ['owner','admin'] },
   { id: 'importproducts', icon: '📤', label: 'Import Produk', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
@@ -1571,6 +1617,8 @@ function navigateTo(page) {
     stockcard: renderStockCard,
     comparison: renderComparison,
     slowmoving: renderSlowMoving,
+    expiredtracking: renderExpiredTracking,
+    restock: renderRestockAlert,
     importproducts: renderImportProducts,
     users: renderUsers,
     settings: renderSettings,
@@ -2609,6 +2657,7 @@ function showProductModal(product) {
   html += '<div class="form-group"><label>Harga Modal</label><input id="pCostPrice" type="text" inputmode="numeric" value="' + formatDots(product?.cost_price || 0) + '" oninput="formatMoneyInput(this)" placeholder="Harga beli/modal"></div>';
   html += '<div class="form-group"><label>Stok *</label><input id="pStock" type="number" min="0" value="' + (product?.stock ?? '') + '" required></div>';
   html += '<div class="form-group"><label>Stok Minimum</label><input id="pMinStock" type="number" min="0" value="' + (product?.min_stock || 0) + '"></div>';
+  html += '<div class="form-group"><label>📅 Tanggal Kadaluarsa <span style="color:#64748b;font-weight:400;font-size:11px">(opsional)</span></label><input id="pExpireDate" type="date" value="' + (product?.expire_date ? product.expire_date.slice(0,10) : '') + '" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg-card);color:var(--text)"></div>';
   html += '<div style="border-top:1px solid #e2e8f0;margin:12px 0;padding-top:12px"><strong>📏 Satuan</strong></div>';
   html += '<div class="form-row"><div class="form-group" style="flex:1"><label>Satuan Jual</label><select id="pUnit"><option value="pcs"' + ((product?.unit||'pcs')==='pcs'?' selected':'') + '>pcs</option><option value="kg"' + ((product?.unit)==='kg'?' selected':'') + '>kg</option><option value="gram"' + ((product?.unit)==='gram'?' selected':'') + '>gram</option><option value="liter"' + ((product?.unit)==='liter'?' selected':'') + '>liter</option><option value="ml"' + ((product?.unit)==='ml'?' selected':'') + '>ml</option><option value="meter"' + ((product?.unit)==='meter'?' selected':'') + '>meter</option><option value="lembar"' + ((product?.unit)==='lembar'?' selected':'') + '>lembar</option><option value="bungkus"' + ((product?.unit)==='bungkus'?' selected':'') + '>bungkus</option><option value="botol"' + ((product?.unit)==='botol'?' selected':'') + '>botol</option><option value="sachet"' + ((product?.unit)==='sachet'?' selected':'') + '>sachet</option></select></div>';
   html += '<div class="form-group" style="flex:1"><label>Satuan Beli (opsional)</label><select id="pPurchaseUnit"><option value="">-- Sama --</option><option value="karung"' + ((product?.purchase_unit)==='karung'?' selected':'') + '>karung</option><option value="box"' + ((product?.purchase_unit)==='box'?' selected':'') + '>box</option><option value="lusin"' + ((product?.purchase_unit)==='lusin'?' selected':'') + '>lusin</option><option value="dus"' + ((product?.purchase_unit)==='dus'?' selected':'') + '>dus</option><option value="bal"' + ((product?.purchase_unit)==='bal'?' selected':'') + '>bal</option><option value="pack"' + ((product?.purchase_unit)==='pack'?' selected':'') + '>pack</option><option value="roll"' + ((product?.purchase_unit)==='roll'?' selected':'') + '>roll</option><option value="sak"' + ((product?.purchase_unit)==='sak'?' selected':'') + '>sak</option></select></div>';
@@ -2658,7 +2707,8 @@ async function saveProduct(id) {
     category_id: document.getElementById('pCategory').value ? Number(document.getElementById('pCategory').value) : null,
     unit: document.getElementById('pUnit').value || 'pcs',
     purchase_unit: document.getElementById('pPurchaseUnit').value || null,
-    conversion_ratio: Number(document.getElementById('pConversionRatio').value) || 1
+    conversion_ratio: Number(document.getElementById('pConversionRatio').value) || 1,
+    expire_date: document.getElementById('pExpireDate').value || null
   };
   if (!payload.name) { showToast('Nama produk wajib diisi', 'error'); return; }
   try {
@@ -4235,6 +4285,213 @@ async function renderSlowMoving() {
 function changeSlowDays(d) {
   slowMovingDays = d;
   renderSlowMoving();
+}
+
+// ============ EXPIRED DATE TRACKING ============
+var expiredDays = 30;
+
+async function renderExpiredTracking() {
+  var main = document.getElementById('mainContent');
+  var html = '<div class="page-header"><h1>\uD83D\uDCC5 Expired Tracking</h1><p>Pantau produk mendekati atau sudah kadaluarsa</p></div>';
+
+  html += '<div class="toolbar"><div class="category-pills">';
+  var dayOpts = [7, 14, 30, 60, 90];
+  for (var di = 0; di < dayOpts.length; di++) {
+    var dd = dayOpts[di];
+    html += '<div class="category-pill' + (expiredDays === dd ? ' active' : '') + '" onclick="changeExpiredDays(' + dd + ')">' + dd + ' Hari</div>';
+  }
+  html += '</div></div>';
+
+  try {
+    var data = await apiFetch('/api/products/expiring?days=' + expiredDays);
+    var products = data || [];
+
+    var expired = products.filter(function(p) { return p.urgency === 'expired'; });
+    var kritis  = products.filter(function(p) { return p.urgency === 'kritis'; });
+    var segera  = products.filter(function(p) { return p.urgency === 'segera'; });
+    var perhatian = products.filter(function(p) { return p.urgency === 'perhatian'; });
+
+    html += '<div class="stat-grid">';
+    html += '<div class="stat-card stat-red"><div class="stat-icon">\u2620\uFE0F</div><div class="stat-value">' + expired.length + '</div><div class="stat-label">Sudah Expired</div></div>';
+    html += '<div class="stat-card stat-orange"><div class="stat-icon">\uD83D\uDD34</div><div class="stat-value">' + kritis.length + '</div><div class="stat-label">Kritis (\u22647 hari)</div></div>';
+    html += '<div class="stat-card stat-yellow"><div class="stat-icon">\uD83D\uDFE1</div><div class="stat-value">' + segera.length + '</div><div class="stat-label">Segera (8-14 hari)</div></div>';
+    html += '<div class="stat-card stat-blue"><div class="stat-icon">\uD83D\uDFE3</div><div class="stat-value">' + perhatian.length + '</div><div class="stat-label">Perhatian (15-' + expiredDays + ' hari)</div></div>';
+    html += '</div>';
+
+    if (products.length === 0) {
+      html += '<div class="card mt-4" style="text-align:center;padding:40px">' + emptyHtml('\uD83C\uDF89', 'Tidak ada produk kadaluarsa dalam ' + expiredDays + ' hari ke depan') + '</div>';
+    } else {
+      // Expired
+      if (expired.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #dc2626"><div class="card-header" style="background:rgba(220,38,38,0.08)"><h3>\u2620\uFE0F SUDAH EXPIRED (' + expired.length + ' produk)</h3></div>';
+        html += renderExpiredTable(expired, true);
+        html += '</div>';
+      }
+      // Kritis
+      if (kritis.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #ef4444"><div class="card-header" style="background:rgba(239,68,68,0.08)"><h3>\uD83D\uDD34 KRITIS \u2014 Habis \u22647 Hari (' + kritis.length + ' produk)</h3></div>';
+        html += renderExpiredTable(kritis, false);
+        html += '</div>';
+      }
+      // Segera
+      if (segera.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #f59e0b"><div class="card-header" style="background:rgba(245,158,11,0.08)"><h3>\uD83D\uDFE1 SEGERA \u2014 Habis 8-14 Hari (' + segera.length + ' produk)</h3></div>';
+        html += renderExpiredTable(segera, false);
+        html += '</div>';
+      }
+      // Perhatian
+      if (perhatian.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #6366f1"><div class="card-header" style="background:rgba(99,102,241,0.08)"><h3>\uD83D\uDFE3 PERHATIAN \u2014 Habis 15-' + expiredDays + ' Hari (' + perhatian.length + ' produk)</h3></div>';
+        html += renderExpiredTable(perhatian, false);
+        html += '</div>';
+      }
+    }
+
+    // Info: produk tanpa expire_date
+    html += '<div class="card mt-4" style="padding:12px 16px;background:rgba(99,102,241,0.05);border:1px dashed var(--border)">';
+    html += '<p style="margin:0;font-size:13px;color:var(--text-secondary)">\uD83D\uDCA1 <strong>Tips:</strong> Atur tanggal kadaluarsa produk di halaman <strong>Kelola Produk</strong> \u2192 Edit Produk \u2192 kolom <em>Tanggal Kadaluarsa</em>. Produk tanpa tanggal kadaluarsa tidak ditampilkan di sini.</p>';
+    html += '</div>';
+
+  } catch (err) {
+    html += '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+
+  main.innerHTML = html;
+}
+
+function renderExpiredTable(products, isExpired) {
+  var h = '<div class="overflow-x"><table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok</th>';
+  h += isExpired ? '<th>Tgl Expired</th><th>Sudah Lewat</th>' : '<th>Tgl Kadaluarsa</th><th>Sisa Hari</th>';
+  h += '<th>Aksi</th></tr></thead><tbody>';
+  for (var i = 0; i < products.length; i++) {
+    var p = products[i];
+    var dateStr = p.expire_date ? p.expire_date.slice(0,10) : '-';
+    var daysLabel = isExpired
+      ? '<span style="color:#dc2626;font-weight:700">' + Math.abs(p.days_until_expire) + ' hari lalu</span>'
+      : '<span style="color:' + (p.days_until_expire <= 7 ? '#ef4444' : p.days_until_expire <= 14 ? '#f59e0b' : '#6366f1') + ';font-weight:700">' + p.days_until_expire + ' hari</span>';
+    h += '<tr>';
+    h += '<td><strong>' + escHtml(p.name) + '</strong></td>';
+    h += '<td>' + escHtml(p.category_name || 'Tanpa Kategori') + '</td>';
+    h += '<td>' + (p.stock || 0) + ' ' + escHtml(p.unit || 'pcs') + '</td>';
+    h += '<td>' + dateStr + '</td>';
+    h += '<td>' + daysLabel + '</td>';
+    h += '<td><button class="btn btn-sm btn-secondary" onclick="showProductById(' + p.id + ')">Edit</button></td>';
+    h += '</tr>';
+  }
+  h += '</tbody></table></div>';
+  return h;
+}
+
+function changeExpiredDays(d) {
+  expiredDays = d;
+  renderExpiredTracking();
+}
+
+async function showProductById(id) {
+  try {
+    const data = await apiFetch('/api/products');
+    const product = data.find(function(p) { return p.id === id; });
+    if (product) showProductModal(product);
+  } catch(e) { showToast('Gagal memuat produk', 'error'); }
+}
+
+// ============ AUTO RESTOCK ALERT ============
+var restockDays = 30;
+
+async function renderRestockAlert() {
+  var main = document.getElementById('mainContent');
+  var html = '<div class="page-header"><h1>\uD83D\uDD14 Restock Alert</h1><p>Rekomendasi restock berdasarkan kecepatan penjualan</p></div>';
+
+  html += '<div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">';
+  html += '<div class="category-pills">';
+  var dayOpts2 = [7, 14, 30, 60, 90];
+  for (var ri = 0; ri < dayOpts2.length; ri++) {
+    var rd = dayOpts2[ri];
+    html += '<div class="category-pill' + (restockDays === rd ? ' active' : '') + '" onclick="changeRestockDays(' + rd + ')">Analisis ' + rd + ' Hari</div>';
+  }
+  html += '</div>';
+  html += '<div style="font-size:12px;color:var(--text-secondary);padding:4px 0">\uD83D\uDCA1 Berdasarkan rata-rata penjualan ' + restockDays + ' hari terakhir</div>';
+  html += '</div>';
+
+  try {
+    var data = await apiFetch('/api/reports/restock-alert?days=' + restockDays);
+    var prods = data.products || [];
+
+    html += '<div class="stat-grid">';
+    html += '<div class="stat-card stat-red"><div class="stat-icon">\uD83D\uDEAB</div><div class="stat-value">' + (data.habis || 0) + '</div><div class="stat-label">Stok Habis</div></div>';
+    html += '<div class="stat-card stat-orange"><div class="stat-icon">\uD83D\uDD34</div><div class="stat-value">' + (data.kritis || 0) + '</div><div class="stat-label">Kritis (\u22643 hari)</div></div>';
+    html += '<div class="stat-card stat-yellow"><div class="stat-icon">\uD83D\uDFE1</div><div class="stat-value">' + (data.segera || 0) + '</div><div class="stat-label">Segera (4-7 hari)</div></div>';
+    html += '<div class="stat-card stat-blue"><div class="stat-icon">\uD83D\uDFE3</div><div class="stat-value">' + (data.perhatian || 0) + '</div><div class="stat-label">Perhatian (8-14 hari)</div></div>';
+    html += '</div>';
+
+    if (prods.length === 0) {
+      html += '<div class="card mt-4" style="text-align:center;padding:40px">' + emptyHtml('\uD83C\uDF89', 'Semua stok aman! Tidak ada restock mendesak saat ini.') + '</div>';
+    } else {
+      var habisProds     = prods.filter(function(p) { return p.urgency === 'habis'; });
+      var kritisProds    = prods.filter(function(p) { return p.urgency === 'kritis'; });
+      var segeraProds    = prods.filter(function(p) { return p.urgency === 'segera'; });
+      var perhatianProds = prods.filter(function(p) { return p.urgency === 'perhatian'; });
+
+      if (habisProds.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #dc2626"><div class="card-header" style="background:rgba(220,38,38,0.08)"><h3>\uD83D\uDEAB STOK HABIS (' + habisProds.length + ' produk) \u2014 Restock Segera!</h3></div>';
+        html += renderRestockTable(habisProds, true);
+        html += '</div>';
+      }
+      if (kritisProds.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #ef4444"><div class="card-header" style="background:rgba(239,68,68,0.08)"><h3>\uD83D\uDD34 KRITIS \u2014 Habis dalam \u22643 Hari (' + kritisProds.length + ' produk)</h3></div>';
+        html += renderRestockTable(kritisProds, false);
+        html += '</div>';
+      }
+      if (segeraProds.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #f59e0b"><div class="card-header" style="background:rgba(245,158,11,0.08)"><h3>\uD83D\uDFE1 SEGERA \u2014 Habis dalam 4-7 Hari (' + segeraProds.length + ' produk)</h3></div>';
+        html += renderRestockTable(segeraProds, false);
+        html += '</div>';
+      }
+      if (perhatianProds.length > 0) {
+        html += '<div class="card mt-4" style="border-left:4px solid #6366f1"><div class="card-header" style="background:rgba(99,102,241,0.08)"><h3>\uD83D\uDFE3 PERHATIAN \u2014 Habis dalam 8-14 Hari (' + perhatianProds.length + ' produk)</h3></div>';
+        html += renderRestockTable(perhatianProds, false);
+        html += '</div>';
+      }
+    }
+
+    html += '<div class="card mt-4" style="padding:12px 16px;background:rgba(99,102,241,0.05);border:1px dashed var(--border)">';
+    html += '<p style="margin:0;font-size:13px;color:var(--text-secondary)">\uD83D\uDCA1 <strong>Cara kerja:</strong> Sistem menghitung rata-rata penjualan per hari dalam <strong>' + restockDays + ' hari terakhir</strong>, lalu memperkirakan kapan stok akan habis. Produk yang belum pernah terjual tidak ditampilkan.</p>';
+    html += '</div>';
+
+  } catch (err) {
+    html += '<div class="alert-box alert-warning">Gagal memuat data: ' + escHtml(err.message) + '</div>';
+  }
+
+  main.innerHTML = html;
+}
+
+function renderRestockTable(products, isHabis) {
+  var h = '<div class="overflow-x"><table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok Saat Ini</th><th>Terjual (' + restockDays + ' hr)</th><th>Rata2/Hari</th>';
+  h += isHabis ? '<th>Status</th>' : '<th>Habis dalam</th>';
+  h += '<th>Aksi</th></tr></thead><tbody>';
+  for (var i = 0; i < products.length; i++) {
+    var p = products[i];
+    var stockColor = p.urgency === 'habis' ? '#dc2626' : p.urgency === 'kritis' ? '#ef4444' : p.urgency === 'segera' ? '#f59e0b' : '#6366f1';
+    var daysLabel = isHabis
+      ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700">HABIS</span>'
+      : '<span style="color:' + stockColor + ';font-weight:700">' + (p.days_until_stockout >= 9999 ? '\u221E' : p.days_until_stockout + ' hari') + '</span>';
+    h += '<tr>';
+    h += '<td><strong>' + escHtml(p.name) + '</strong></td>';
+    h += '<td>' + escHtml(p.category_name || '-') + '</td>';
+    h += '<td><span style="color:' + stockColor + ';font-weight:700">' + (p.stock || 0) + ' ' + escHtml(p.unit || 'pcs') + '</span></td>';
+    h += '<td>' + (p.total_sold || 0) + ' ' + escHtml(p.unit || 'pcs') + '</td>';
+    h += '<td>' + (p.avg_daily_sales || 0) + '/hari</td>';
+    h += '<td>' + daysLabel + '</td>';
+    h += '<td><button class="btn btn-sm btn-primary" onclick="showPage(\'stockin\')" style="font-size:11px">\uD83D\uDCE5 Beli Stok</button></td>';
+    h += '</tr>';
+  }
+  h += '</tbody></table></div>';
+  return h;
+}
+
+function changeRestockDays(d) {
+  restockDays = d;
+  renderRestockAlert();
 }
 
 // ============ LABA RUGI ============

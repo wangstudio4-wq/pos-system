@@ -866,6 +866,37 @@ app.get('/api/products/low-stock', authenticateToken, async (req, res) => {
 });
 
 // GET all products (with category)
+app.get('/api/products/expiring', authenticateToken, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const [rows] = await pool.query(
+      `SELECT p.*, c.name as category_name
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.id
+       WHERE p.expire_date IS NOT NULL
+         AND p.expire_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
+       ORDER BY p.expire_date ASC`,
+      [days]
+    );
+    // Classify urgency
+    const today = new Date();
+    const result = rows.map(p => {
+      const exp = new Date(p.expire_date);
+      const diffMs = exp - today;
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      let urgency = 'perhatian';
+      if (diffDays <= 0) urgency = 'expired';
+      else if (diffDays <= 7) urgency = 'kritis';
+      else if (diffDays <= 14) urgency = 'segera';
+      return { ...p, days_until_expire: diffDays, urgency };
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('Expiring products error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/products', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -884,15 +915,15 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 // POST new product
 app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio, expire_date } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({ error: 'Nama dan harga produk wajib diisi.' });
     }
 
     const [result] = await pool.query(
-      'INSERT INTO products (barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [barcode || null, name, price, cost_price || 0, stock || 0, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1]
+      'INSERT INTO products (barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio, expire_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [barcode || null, name, price, cost_price || 0, stock || 0, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1, expire_date || null]
     );
 
     res.status(201).json({
@@ -911,10 +942,10 @@ app.post('/api/products', authenticateToken, authorizeRole('admin', 'owner'), as
 // PUT update product
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
   try {
-    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio } = req.body;
+    const { barcode, name, price, cost_price, stock, category_id, min_stock, unit, purchase_unit, conversion_ratio, expire_date } = req.body;
     await pool.query(
-      'UPDATE products SET barcode = ?, name = ?, price = ?, cost_price = ?, stock = ?, category_id = ?, min_stock = ?, unit = ?, purchase_unit = ?, conversion_ratio = ? WHERE id = ?',
-      [barcode || null, name, price, cost_price || 0, stock, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1, req.params.id]
+      'UPDATE products SET barcode = ?, name = ?, price = ?, cost_price = ?, stock = ?, category_id = ?, min_stock = ?, unit = ?, purchase_unit = ?, conversion_ratio = ?, expire_date = ? WHERE id = ?',
+      [barcode || null, name, price, cost_price || 0, stock, category_id || null, min_stock || 5, unit || 'pcs', purchase_unit || null, conversion_ratio || 1, expire_date || null, req.params.id]
     );
     res.json({ message: 'Produk berhasil diupdate!' });
   } catch (err) {
@@ -1622,6 +1653,71 @@ app.get('/api/reports/slow-moving', authenticateToken, authorizeRole('admin', 'o
   } catch (err) {
     console.error('Slow moving report error:', err);
     res.status(500).json({ error: 'Gagal mengambil data produk slow moving.' });
+  }
+});
+
+// ============ AUTO RESTOCK ALERT ============
+app.get('/api/reports/restock-alert', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoff = cutoffDate.toISOString().slice(0, 10) + ' 00:00:00';
+
+    const [products] = await pool.query(
+      `SELECT p.id, p.name, p.stock, p.price, p.cost_price, p.unit, p.min_stock,
+              COALESCE(c.name, 'Tanpa Kategori') as category_name,
+              COALESCE(SUM(ti.qty), 0) as total_sold
+       FROM products p
+       LEFT JOIN transaction_items ti ON ti.product_id = p.id
+       LEFT JOIN transactions t ON ti.transaction_id = t.id AND t.created_at >= ? AND (t.status IS NULL OR t.status = 'completed')
+       LEFT JOIN categories c ON p.category_id = c.id
+       GROUP BY p.id
+       ORDER BY p.name ASC`,
+      [cutoff]
+    );
+
+    const result = products.map(p => {
+      const avgDailySales = (Number(p.total_sold) || 0) / days;
+      const daysUntilStockout = avgDailySales > 0 ? Math.floor(Number(p.stock) / avgDailySales) : 9999;
+      let urgency = 'aman';
+      if (Number(p.stock) === 0) urgency = 'habis';
+      else if (daysUntilStockout <= 3) urgency = 'kritis';
+      else if (daysUntilStockout <= 7) urgency = 'segera';
+      else if (daysUntilStockout <= 14) urgency = 'perhatian';
+      return {
+        id: p.id,
+        name: p.name,
+        stock: p.stock,
+        unit: p.unit,
+        min_stock: p.min_stock,
+        category_name: p.category_name,
+        cost_price: p.cost_price,
+        price: p.price,
+        total_sold: p.total_sold,
+        avg_daily_sales: Math.round(avgDailySales * 100) / 100,
+        days_until_stockout: daysUntilStockout,
+        urgency
+      };
+    }).filter(p => p.urgency !== 'aman');
+
+    result.sort((a, b) => {
+      const order = { habis: 0, kritis: 1, segera: 2, perhatian: 3 };
+      return (order[a.urgency] || 99) - (order[b.urgency] || 99) || a.days_until_stockout - b.days_until_stockout;
+    });
+
+    res.json({
+      days,
+      total_alerts: result.length,
+      habis: result.filter(p => p.urgency === 'habis').length,
+      kritis: result.filter(p => p.urgency === 'kritis').length,
+      segera: result.filter(p => p.urgency === 'segera').length,
+      perhatian: result.filter(p => p.urgency === 'perhatian').length,
+      products: result
+    });
+  } catch (err) {
+    console.error('Restock alert error:', err);
+    res.status(500).json({ error: 'Gagal mengambil data restock alert.' });
   }
 });
 
