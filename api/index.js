@@ -470,6 +470,8 @@ async function runAutoMigrate() {
   await safeExec('products.unit', `ALTER TABLE products ADD COLUMN unit VARCHAR(20) DEFAULT 'pcs'`);
   await safeExec('products.purchase_unit', `ALTER TABLE products ADD COLUMN purchase_unit VARCHAR(20) DEFAULT NULL`);
   await safeExec('products.conversion_ratio', `ALTER TABLE products ADD COLUMN conversion_ratio DECIMAL(10,4) DEFAULT 1`);
+  // Fase 3: Expired Date
+  await safeExec('products.expire_date', `ALTER TABLE products ADD COLUMN expire_date DATE DEFAULT NULL`);
   // Fase 2B: Harga Grosir
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
@@ -713,6 +715,8 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('products.unit', `ALTER TABLE products ADD COLUMN unit VARCHAR(20) DEFAULT 'pcs'`);
   await safeExec('products.purchase_unit', `ALTER TABLE products ADD COLUMN purchase_unit VARCHAR(20) DEFAULT NULL`);
   await safeExec('products.conversion_ratio', `ALTER TABLE products ADD COLUMN conversion_ratio DECIMAL(10,4) DEFAULT 1`);
+  // Fase 3: Expired Date
+  await safeExec('products.expire_date', `ALTER TABLE products ADD COLUMN expire_date DATE DEFAULT NULL`);
   // Fase 2B: Harga Grosir
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
