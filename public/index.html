@@ -1569,6 +1569,8 @@ const NAV_ITEMS = [
   { id: 'slowmoving', icon: '🐌', label: 'Produk Slow Moving', roles: ['owner','admin'] },
   { id: 'expiredtracking', icon: '📅', label: 'Expired Tracking', roles: ['owner','admin'] },
   { id: 'restock', icon: '🔔', label: 'Restock Alert', roles: ['owner','admin'] },
+  { id: 'members', icon: '👥', label: 'Member', roles: ['owner','admin','kasir'] },
+  { id: 'rewards', icon: '🎁', label: 'Rewards', roles: ['owner','admin'] },
   { id: 'importproducts', icon: '📤', label: 'Import Produk', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
@@ -1603,6 +1605,8 @@ function navigateTo(page) {
   const renderers = {
     dashboard: renderDashboard,
     pos: renderPOS,
+    members: renderMembers,
+    rewards: renderRewards,
     history: renderHistory,
     products: renderProducts,
     categories: renderCategories,
@@ -1845,6 +1849,7 @@ let posCategories = [];
 let cart = [];
 let selectedCategory = null;
 let selectedPayMethod = 'Cash';
+let selectedPOSMember = null; // { id, name, member_code, points, level_name, level_icon, discount_percent }
 let posSearchTerm = '';
 let heldOrders = JSON.parse(localStorage.getItem('kasirpro_held_orders') || '[]');
 let activeShift = null; // Track current active shift
@@ -2204,11 +2209,12 @@ function updateCartUI() {
 }
 
 function calcTaxService(subtotal, totalDiscount) {
-  const afterDiscount = Math.max(subtotal - totalDiscount, 0);
+  const memberDiscAmt = (selectedPOSMember && selectedPOSMember.discount_percent > 0) ? Math.round(subtotal * selectedPOSMember.discount_percent / 100) : 0;
+  const afterDiscount = Math.max(subtotal - totalDiscount - memberDiscAmt, 0);
   let taxAmt = 0, serviceAmt = 0;
   if (appSettings.tax_enabled) taxAmt = Math.round(afterDiscount * (appSettings.tax_rate || 0) / 100);
   if (appSettings.service_charge_enabled) serviceAmt = Math.round(afterDiscount * (appSettings.service_charge_rate || 0) / 100);
-  return { afterDiscount, taxAmt, serviceAmt, grandTotal: afterDiscount + taxAmt + serviceAmt };
+  return { afterDiscount, taxAmt, serviceAmt, grandTotal: afterDiscount + taxAmt + serviceAmt, memberDiscAmt };
 }
 
 function renderCartPanel() {
@@ -2253,6 +2259,25 @@ function renderCartPanel() {
   html += '</div>';
 
   // Summary
+  // Member selection
+  html += '<div style="background:linear-gradient(135deg,#8b5cf622,#8b5cf608);border:1px solid #c4b5fd;border-radius:10px;padding:10px;margin-bottom:10px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#7c3aed">👥 Member</span>';
+  if (selectedPOSMember) html += '<button onclick="clearPOSMember()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:11px">✕ Hapus</button>';
+  html += '</div>';
+  if (selectedPOSMember) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+    html += '<div><strong>' + escHtml(selectedPOSMember.name) + '</strong> <span style="font-size:11px;color:#64748b">' + escHtml(selectedPOSMember.member_code || '') + '</span>';
+    html += '<div style="font-size:11px">' + (selectedPOSMember.level_icon || '🥉') + ' ' + escHtml(selectedPOSMember.level_name || 'Bronze');
+    if (selectedPOSMember.discount_percent > 0) html += ' — <span style="color:#16a34a">Disc ' + selectedPOSMember.discount_percent + '%</span>';
+    html += '</div></div>';
+    html += '<div style="color:#8b5cf6;font-weight:700">🪙 ' + (selectedPOSMember.points || 0) + '</div>';
+    html += '</div>';
+  } else {
+    html += '<input type="text" id="posMemberSearch" placeholder="🔍 Cari member..." oninput="searchPOSMember(this.value)" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">';
+    html += '<div id="posMemberResults"></div>';
+  }
+  html += '</div>';
+
   html += '<div class="cart-summary">';
   html += '<div class="summary-row"><span>Subtotal</span><span>' + formatRp(subtotal) + '</span></div>';
   html += '<div class="discount-input"><label>Diskon:</label><input type="number" id="cartDiscount" min="0" value="' + totalDiscount + '" onchange="updateCartUI()" placeholder="0"></div>';
@@ -2261,6 +2286,11 @@ function renderCartPanel() {
   }
   if (appSettings.service_charge_enabled && serviceAmt > 0) {
     html += '<div class="summary-row"><span>Service (' + appSettings.service_charge_rate + '%)</span><span>' + formatRp(serviceAmt) + '</span></div>';
+  }
+  // Member discount
+  if (selectedPOSMember && selectedPOSMember.discount_percent > 0) {
+    const memberDiscAmt = Math.round(subtotal * selectedPOSMember.discount_percent / 100);
+    html += '<div class="summary-row" style="color:#16a34a"><span>🏷️ Disc Member ' + selectedPOSMember.discount_percent + '%</span><span>-' + formatRp(memberDiscAmt) + '</span></div>';
   }
   html += '<div class="summary-row total"><span>TOTAL</span><span>' + formatRp(grandTotal) + '</span></div>';
 
@@ -2372,8 +2402,8 @@ async function processPayment() {
     payment: payment,
     change: selectedPayMethod === 'Hutang' ? 0 : change,
     payment_method: selectedPayMethod,
-    customer_id: null,
-    customer_name: selectedPayMethod === 'Hutang' ? kasbonName : 'Umum',
+    customer_id: selectedPOSMember ? selectedPOSMember.id : null,
+    customer_name: selectedPOSMember ? selectedPOSMember.name : (selectedPayMethod === 'Hutang' ? kasbonName : 'Umum'),
     customer_phone: selectedPayMethod === 'Hutang' ? kasbonPhone : null,
     notes: notes,
     tax_amount: taxAmt,
@@ -2394,6 +2424,7 @@ async function processPayment() {
     }
     showReceipt(payload, result);
     cart = [];
+    selectedPOSMember = null;
     // Refresh products stock
     try {
       const prodData = await apiFetch('/api/products');
@@ -5252,6 +5283,528 @@ function updatePendingBadge() {
 }
 
 var _isOnline = navigator.onLine;
+
+
+
+// POS Member search helpers
+async function searchPOSMember(q) {
+  const results = document.getElementById('posMemberResults');
+  if (!results) return;
+  if (q.length < 2) { results.innerHTML = ''; return; }
+  try {
+    const members = await apiFetch('/api/members/search/quick?q=' + encodeURIComponent(q));
+    let html = '';
+    members.forEach(m => {
+      html += '<div style="padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;margin-top:4px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:center" onclick="selectPOSMember(' + JSON.stringify(JSON.stringify(m)).slice(1,-1) + ')">';
+      html += '<div>' + (m.level_icon || '🥉') + ' <strong>' + escHtml(m.name) + '</strong> <span style="color:#64748b">' + escHtml(m.member_code || '') + '</span></div>';
+      html += '<span style="color:#8b5cf6;font-weight:600">🪙' + m.points + '</span></div>';
+    });
+    results.innerHTML = html || '<div style="font-size:12px;color:#94a3b8;padding:4px">Tidak ditemukan</div>';
+  } catch(e) { /* ignore */ }
+}
+
+function selectPOSMember(memberJson) {
+  selectedPOSMember = typeof memberJson === 'string' ? JSON.parse(memberJson) : memberJson;
+  updateCartUI();
+  showToast('👥 Member ' + selectedPOSMember.name + ' dipilih! Disc ' + (selectedPOSMember.discount_percent || 0) + '%', 'success');
+}
+
+function clearPOSMember() {
+  selectedPOSMember = null;
+  updateCartUI();
+}
+
+// ============================
+// MEMBER MANAGEMENT
+// ============================
+let memberSearch = '';
+let memberLevelFilter = '';
+let memberLevels = [];
+let selectedMember = null;
+
+async function renderMembers() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="text-align:center;padding:60px"><div class="spinner"></div><p>Memuat data member...</p></div>';
+  try {
+    const [stats, levels] = await Promise.all([
+      apiFetch('/api/members/stats/summary'),
+      apiFetch('/api/member-levels')
+    ]);
+    memberLevels = levels;
+    let html = '<div class="page-header"><h2>👥 Member Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">';
+    html += '<button class="btn btn-primary" onclick="showAddMemberModal()">+ Tambah Member</button>';
+    if (currentUser.role === 'owner') html += '<button class="btn" onclick="showPointSettingsModal()" style="background:#8b5cf6;color:#fff">⚙️ Setting Poin</button>';
+    if (currentUser.role === 'owner') html += '<button class="btn" onclick="showLevelSettingsModal()" style="background:#f59e0b;color:#fff">🏅 Setting Level</button>';
+    html += '</div></div>';
+
+    // Stats
+    html += '<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">';
+    html += '<div class="stat-card"><div class="stat-number">' + stats.total_members + '</div><div class="stat-label">Total Member</div></div>';
+    stats.by_level.forEach(l => {
+      html += '<div class="stat-card" style="border-left:4px solid ' + l.color + '"><div class="stat-number">' + l.cnt + '</div><div class="stat-label">' + l.icon + ' ' + l.name + '</div></div>';
+    });
+    html += '<div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-number">' + stats.new_this_month + '</div><div class="stat-label">Baru Bulan Ini</div></div>';
+    html += '</div>';
+
+    // Search & filter
+    html += '<div style="display:flex;gap:8px;margin:16px 0;flex-wrap:wrap">';
+    html += '<input type="text" id="memberSearchInput" placeholder="🔍 Cari nama/HP/kode..." value="' + escHtml(memberSearch) + '" oninput="memberSearch=this.value;loadMemberList()" style="flex:1;min-width:200px;padding:10px;border:1px solid #d1d5db;border-radius:8px">';
+    html += '<select id="memberLevelSelect" onchange="memberLevelFilter=this.value;loadMemberList()" style="padding:10px;border:1px solid #d1d5db;border-radius:8px"><option value="">Semua Level</option>';
+    levels.forEach(l => { html += '<option value="' + l.id + '"' + (memberLevelFilter == l.id ? ' selected' : '') + '>' + l.icon + ' ' + l.name + '</option>'; });
+    html += '</select></div>';
+
+    html += '<div id="memberListContainer"></div>';
+    main.innerHTML = html;
+    loadMemberList();
+  } catch(e) { main.innerHTML = '<div class="alert alert-error">Gagal memuat: ' + escHtml(e.message) + '</div>'; }
+}
+
+async function loadMemberList() {
+  const container = document.getElementById('memberListContainer');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
+  try {
+    let url = '/api/members?is_active=1';
+    if (memberSearch) url += '&search=' + encodeURIComponent(memberSearch);
+    if (memberLevelFilter) url += '&level_id=' + memberLevelFilter;
+    const members = await apiFetch(url);
+    if (!members.length) { container.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8">Belum ada member</div>'; return; }
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px">';
+    members.forEach(m => {
+      html += '<div class="card" style="padding:16px;cursor:pointer;border-left:4px solid ' + (m.level_color || '#3b82f6') + '" onclick="showMemberDetail(' + m.id + ')">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:start">';
+      html += '<div><div style="font-weight:700;font-size:15px">' + escHtml(m.name) + '</div>';
+      html += '<div style="font-size:12px;color:#64748b;margin-top:2px">' + escHtml(m.member_code || '-') + '</div>';
+      if (m.phone) html += '<div style="font-size:12px;color:#64748b">📱 ' + escHtml(m.phone) + '</div>';
+      html += '</div>';
+      html += '<div style="text-align:right">';
+      html += '<div style="font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600;color:#fff;background:' + (m.level_color || '#3b82f6') + '">' + (m.level_icon || '🥉') + ' ' + escHtml(m.level_name || 'Bronze') + '</div>';
+      html += '<div style="font-size:18px;font-weight:700;color:#8b5cf6;margin-top:4px">🪙 ' + (m.points || 0) + '</div>';
+      html += '</div></div>';
+      html += '<div style="display:flex;gap:12px;margin-top:10px;font-size:12px;color:#64748b">';
+      html += '<span>🛒 ' + (m.total_transactions || 0) + ' transaksi</span>';
+      html += '<span>💰 ' + formatRp(m.total_spent || 0) + '</span>';
+      if (m.discount_percent > 0) html += '<span style="color:#16a34a">🏷️ Disc ' + m.discount_percent + '%</span>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  } catch(e) { container.innerHTML = '<div class="alert alert-error">' + escHtml(e.message) + '</div>'; }
+}
+
+async function showMemberDetail(id) {
+  try {
+    const m = await apiFetch('/api/members/' + id);
+    selectedMember = m;
+    let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+    html += '<div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto">';
+    html += '<div class="modal-header"><h3>' + (m.level_icon || '🥉') + ' ' + escHtml(m.name) + '</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+    
+    // Info card
+    html += '<div style="background:linear-gradient(135deg,' + (m.level_color || '#3b82f6') + '22, ' + (m.level_color || '#3b82f6') + '08);border-radius:12px;padding:16px;margin-bottom:16px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+    html += '<div><div style="font-size:12px;color:#64748b">Kode Member</div><div style="font-weight:700">' + escHtml(m.member_code || '-') + '</div></div>';
+    html += '<div style="text-align:center"><div style="font-size:28px;font-weight:800;color:#8b5cf6">🪙 ' + (m.points || 0) + '</div><div style="font-size:11px;color:#64748b">Poin</div></div>';
+    html += '<div style="text-align:right;padding:6px 14px;border-radius:20px;font-weight:600;color:#fff;background:' + (m.level_color || '#3b82f6') + '">' + (m.level_icon || '🥉') + ' ' + escHtml(m.level_name || 'Bronze') + '</div>';
+    html += '</div>';
+    if (m.next_level) {
+      const needed = m.next_level.min_points - m.points;
+      const progress = Math.min(100, Math.round((m.points / m.next_level.min_points) * 100));
+      html += '<div style="font-size:11px;color:#64748b;margin-bottom:4px">Next: ' + m.next_level.icon + ' ' + m.next_level.name + ' (' + needed + ' poin lagi)</div>';
+      html += '<div style="background:#e2e8f0;border-radius:8px;height:8px;overflow:hidden"><div style="background:linear-gradient(90deg,#8b5cf6,#a78bfa);height:100%;width:' + progress + '%;border-radius:8px;transition:width .3s"></div></div>';
+    }
+    html += '</div>';
+
+    // Detail info
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px">';
+    html += '<div>📱 <strong>HP:</strong> ' + escHtml(m.phone || '-') + '</div>';
+    html += '<div>📧 <strong>Email:</strong> ' + escHtml(m.email || '-') + '</div>';
+    html += '<div>🛒 <strong>Transaksi:</strong> ' + (m.total_transactions || 0) + 'x</div>';
+    html += '<div>💰 <strong>Total Belanja:</strong> ' + formatRp(m.total_spent || 0) + '</div>';
+    html += '<div>🏷️ <strong>Diskon:</strong> ' + (m.discount_percent || 0) + '%</div>';
+    html += '<div>📅 <strong>Sejak:</strong> ' + (m.member_since ? new Date(m.member_since).toLocaleDateString('id') : '-') + '</div>';
+    if (m.address) html += '<div style="grid-column:1/-1">📍 <strong>Alamat:</strong> ' + escHtml(m.address) + '</div>';
+    if (m.notes) html += '<div style="grid-column:1/-1">📝 <strong>Catatan:</strong> ' + escHtml(m.notes) + '</div>';
+    html += '</div>';
+
+    // Action buttons
+    html += '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">';
+    html += '<button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove();showEditMemberModal(' + m.id + ')">✏️ Edit</button>';
+    html += '<button class="btn" style="background:#8b5cf6;color:#fff" onclick="showAdjustPointsModal(' + m.id + ',\'' + escHtml(m.name) + '\',' + m.points + ')">🪙 Adjust Poin</button>';
+    if (currentUser.role === 'owner') html += '<button class="btn" style="background:#ef4444;color:#fff" onclick="if(confirm(\' Hapus member ' + escHtml(m.name) + '?\'))deleteMember(' + m.id + ')">🗑️ Hapus</button>';
+    html += '</div>';
+
+    // Point history
+    if (m.point_history && m.point_history.length > 0) {
+      html += '<div style="margin-bottom:16px"><h4 style="margin-bottom:8px">📊 Riwayat Poin</h4>';
+      html += '<div style="max-height:200px;overflow-y:auto"><table class="table" style="font-size:12px"><thead><tr><th>Tanggal</th><th>Tipe</th><th>Poin</th><th>Saldo</th><th>Keterangan</th></tr></thead><tbody>';
+      m.point_history.forEach(p => {
+        const color = p.points >= 0 ? '#16a34a' : '#ef4444';
+        const typeLabel = {earn:'✅ Dapat',redeem:'🎁 Tukar',adjust:'🔧 Adjust',bonus:'⭐ Bonus'}[p.type] || p.type;
+        html += '<tr><td>' + new Date(p.created_at).toLocaleDateString('id') + '</td><td>' + typeLabel + '</td><td style="color:' + color + ';font-weight:600">' + (p.points > 0 ? '+' : '') + p.points + '</td><td>' + p.balance_after + '</td><td>' + escHtml(p.description || '-') + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    }
+
+    // Recent transactions
+    if (m.recent_transactions && m.recent_transactions.length > 0) {
+      html += '<h4 style="margin-bottom:8px">🧾 Transaksi Terakhir</h4>';
+      html += '<table class="table" style="font-size:12px"><thead><tr><th>Tanggal</th><th>Total</th><th>Metode</th></tr></thead><tbody>';
+      m.recent_transactions.forEach(t => {
+        html += '<tr><td>' + formatDateTime(t.created_at) + '</td><td>' + formatRp(t.total) + '</td><td>' + payMethodBadge(t.payment_method) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) { showToast('Gagal memuat detail: ' + e.message, 'error'); }
+}
+
+function showAddMemberModal() {
+  let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+  html += '<div class="modal" style="max-width:500px">';
+  html += '<div class="modal-header"><h3>➕ Tambah Member Baru</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+  html += '<div class="form-group"><label>Nama *</label><input type="text" id="memberName" placeholder="Nama lengkap"></div>';
+  html += '<div class="form-group"><label>No HP</label><input type="text" id="memberPhone" placeholder="08xxxxxxxxxx"></div>';
+  html += '<div class="form-group"><label>Email</label><input type="email" id="memberEmail" placeholder="email@contoh.com"></div>';
+  html += '<div class="form-group"><label>Alamat</label><textarea id="memberAddress" rows="2" placeholder="Alamat..."></textarea></div>';
+  html += '<div class="form-group"><label>Catatan</label><textarea id="memberNotes" rows="2" placeholder="Catatan internal..."></textarea></div>';
+  html += '<button class="btn btn-primary" onclick="saveMember()" style="width:100%">💾 Simpan Member</button>';
+  html += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function saveMember() {
+  const name = document.getElementById('memberName').value.trim();
+  if (!name) return showToast('Nama wajib diisi!', 'error');
+  try {
+    const body = {
+      name, phone: document.getElementById('memberPhone').value.trim() || null,
+      email: document.getElementById('memberEmail').value.trim() || null,
+      address: document.getElementById('memberAddress').value.trim() || null,
+      notes: document.getElementById('memberNotes').value.trim() || null
+    };
+    const result = await apiFetch('/api/members', { method: 'POST', body: JSON.stringify(body) });
+    showToast('Member ' + name + ' berhasil ditambahkan! Kode: ' + result.member_code, 'success');
+    document.querySelector('.modal-overlay').remove();
+    renderMembers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function showEditMemberModal(id) {
+  try {
+    const m = await apiFetch('/api/members/' + id);
+    let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+    html += '<div class="modal" style="max-width:500px">';
+    html += '<div class="modal-header"><h3>✏️ Edit Member</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+    html += '<div class="form-group"><label>Nama *</label><input type="text" id="editMemberName" value="' + escHtml(m.name) + '"></div>';
+    html += '<div class="form-group"><label>No HP</label><input type="text" id="editMemberPhone" value="' + escHtml(m.phone || '') + '"></div>';
+    html += '<div class="form-group"><label>Email</label><input type="email" id="editMemberEmail" value="' + escHtml(m.email || '') + '"></div>';
+    html += '<div class="form-group"><label>Alamat</label><textarea id="editMemberAddress" rows="2">' + escHtml(m.address || '') + '</textarea></div>';
+    html += '<div class="form-group"><label>Catatan</label><textarea id="editMemberNotes" rows="2">' + escHtml(m.notes || '') + '</textarea></div>';
+    html += '<div class="form-group"><label><input type="checkbox" id="editMemberActive"' + (m.is_active ? ' checked' : '') + '> Aktif</label></div>';
+    html += '<button class="btn btn-primary" onclick="updateMember(' + id + ')" style="width:100%">💾 Update</button>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function updateMember(id) {
+  try {
+    const body = {
+      name: document.getElementById('editMemberName').value.trim(),
+      phone: document.getElementById('editMemberPhone').value.trim() || null,
+      email: document.getElementById('editMemberEmail').value.trim() || null,
+      address: document.getElementById('editMemberAddress').value.trim() || null,
+      notes: document.getElementById('editMemberNotes').value.trim() || null,
+      is_active: document.getElementById('editMemberActive').checked ? 1 : 0
+    };
+    await apiFetch('/api/members/' + id, { method: 'PUT', body: JSON.stringify(body) });
+    showToast('Member berhasil diupdate!', 'success');
+    document.querySelector('.modal-overlay').remove();
+    renderMembers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteMember(id) {
+  try {
+    await apiFetch('/api/members/' + id, { method: 'DELETE' });
+    showToast('Member berhasil dihapus!', 'success');
+    document.querySelector('.modal-overlay').remove();
+    renderMembers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+function showAdjustPointsModal(id, name, currentPts) {
+  let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()" style="z-index:100002">';
+  html += '<div class="modal" style="max-width:400px;z-index:100003">';
+  html += '<div class="modal-header"><h3>🪙 Adjust Poin — ' + escHtml(name) + '</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+  html += '<div style="text-align:center;font-size:24px;font-weight:700;color:#8b5cf6;margin-bottom:16px">Saldo: ' + currentPts + ' poin</div>';
+  html += '<div class="form-group"><label>Jumlah Poin (negatif untuk kurangi)</label><input type="number" id="adjustPointsAmount" placeholder="contoh: 100 atau -50"></div>';
+  html += '<div class="form-group"><label>Keterangan</label><input type="text" id="adjustPointsDesc" placeholder="Alasan adjust..."></div>';
+  html += '<button class="btn btn-primary" onclick="doAdjustPoints(' + id + ')" style="width:100%">✅ Adjust Poin</button>';
+  html += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function doAdjustPoints(id) {
+  const points = parseInt(document.getElementById('adjustPointsAmount').value);
+  if (isNaN(points) || points === 0) return showToast('Masukkan jumlah poin!', 'error');
+  const description = document.getElementById('adjustPointsDesc').value.trim();
+  try {
+    await apiFetch('/api/members/' + id + '/adjust-points', { method: 'POST', body: JSON.stringify({ points, description }) });
+    showToast('Poin berhasil di-adjust!', 'success');
+    document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
+    renderMembers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function showPointSettingsModal() {
+  try {
+    const settings = await apiFetch('/api/settings/points');
+    let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+    html += '<div class="modal" style="max-width:450px">';
+    html += '<div class="modal-header"><h3>⚙️ Setting Poin</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+    html += '<div class="form-group"><label>Poin Aktif</label><select id="setPointsEnabled"><option value="1"' + (settings.points_enabled !== '0' ? ' selected' : '') + '>Ya, aktif</option><option value="0"' + (settings.points_enabled === '0' ? ' selected' : '') + '>Tidak</option></select></div>';
+    html += '<div class="form-group"><label>Setiap belanja Rp</label><input type="number" id="setPointsPerAmount" value="' + (settings.points_per_amount || 10000) + '" min="1000" step="1000"></div>';
+    html += '<div class="form-group"><label>Dapat berapa poin</label><input type="number" id="setPointsRatio" value="' + (settings.points_earn_ratio || 1) + '" min="1"></div>';
+    html += '<div style="background:#f0f9ff;padding:10px;border-radius:8px;font-size:12px;color:#0369a1;margin-bottom:16px">💡 Contoh: Setiap belanja Rp ' + formatRp(settings.points_per_amount || 10000) + ' dapat ' + (settings.points_earn_ratio || 1) + ' poin</div>';
+    html += '<button class="btn btn-primary" onclick="savePointSettings()" style="width:100%">💾 Simpan</button>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function savePointSettings() {
+  try {
+    await apiFetch('/api/settings/points', { method: 'PUT', body: JSON.stringify({
+      points_enabled: document.getElementById('setPointsEnabled').value,
+      points_per_amount: document.getElementById('setPointsPerAmount').value,
+      points_earn_ratio: document.getElementById('setPointsRatio').value
+    })});
+    showToast('Setting poin berhasil disimpan!', 'success');
+    document.querySelector('.modal-overlay').remove();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function showLevelSettingsModal() {
+  try {
+    const levels = await apiFetch('/api/member-levels');
+    let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+    html += '<div class="modal" style="max-width:550px">';
+    html += '<div class="modal-header"><h3>🏅 Setting Level Member</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+    html += '<table class="table" style="font-size:13px"><thead><tr><th>Icon</th><th>Nama</th><th>Min Poin</th><th>Diskon %</th><th>Warna</th><th></th></tr></thead><tbody>';
+    levels.forEach(l => {
+      html += '<tr>';
+      html += '<td><input type="text" id="lvlIcon' + l.id + '" value="' + escHtml(l.icon) + '" style="width:40px;text-align:center"></td>';
+      html += '<td><input type="text" id="lvlName' + l.id + '" value="' + escHtml(l.name) + '" style="width:80px"></td>';
+      html += '<td><input type="number" id="lvlPts' + l.id + '" value="' + l.min_points + '" style="width:70px"></td>';
+      html += '<td><input type="number" id="lvlDisc' + l.id + '" value="' + l.discount_percent + '" step="0.5" style="width:60px"></td>';
+      html += '<td><input type="color" id="lvlColor' + l.id + '" value="' + l.color + '" style="width:40px;height:30px;padding:0;border:none"></td>';
+      html += '<td><button class="btn btn-primary" onclick="saveLevelSetting(' + l.id + ')" style="padding:4px 10px;font-size:11px">💾</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="background:#fef3c7;padding:10px;border-radius:8px;font-size:12px;color:#92400e;margin-top:12px">⚠️ Level otomatis naik saat poin member mencapai minimum poin level tersebut.</div>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function saveLevelSetting(id) {
+  try {
+    await apiFetch('/api/member-levels/' + id, { method: 'PUT', body: JSON.stringify({
+      icon: document.getElementById('lvlIcon' + id).value,
+      name: document.getElementById('lvlName' + id).value,
+      min_points: parseInt(document.getElementById('lvlPts' + id).value),
+      discount_percent: parseFloat(document.getElementById('lvlDisc' + id).value),
+      color: document.getElementById('lvlColor' + id).value
+    })});
+    showToast('Level berhasil diupdate!', 'success');
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ============================
+// REWARDS MANAGEMENT
+// ============================
+async function renderRewards() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
+  try {
+    const rewards = await apiFetch('/api/rewards');
+    let html = '<div class="page-header"><h2>🎁 Rewards Catalog</h2>';
+    html += '<button class="btn btn-primary" onclick="showAddRewardModal()">+ Tambah Reward</button></div>';
+
+    if (!rewards.length) {
+      html += '<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:48px;margin-bottom:12px">🎁</div><p>Belum ada reward. Tambahkan reward yang bisa ditukar member!</p></div>';
+    } else {
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+      rewards.forEach(r => {
+        const typeLabel = {discount_percent:'🏷️ Diskon %',discount_fixed:'💵 Potongan',free_product:'📦 Produk Gratis',voucher:'🎫 Voucher'}[r.reward_type] || r.reward_type;
+        const valueText = r.reward_type === 'discount_percent' ? r.reward_value + '%' : (r.reward_type === 'free_product' ? '' : formatRp(r.reward_value));
+        html += '<div class="card" style="padding:16px;opacity:' + (r.is_active ? '1' : '0.5') + '">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:start">';
+        html += '<div><div style="font-weight:700;font-size:15px">' + escHtml(r.name) + '</div>';
+        if (r.description) html += '<div style="font-size:12px;color:#64748b;margin-top:2px">' + escHtml(r.description) + '</div>';
+        html += '<div style="font-size:12px;margin-top:4px">' + typeLabel + (valueText ? ' ' + valueText : '') + '</div>';
+        html += '</div>';
+        html += '<div style="text-align:right">';
+        html += '<div style="font-size:20px;font-weight:800;color:#8b5cf6">🪙 ' + r.points_cost + '</div>';
+        html += '<div style="font-size:11px;color:#64748b">' + (r.stock < 0 ? '∞ Unlimited' : (r.stock === 0 ? '❌ Habis' : r.stock + ' tersisa')) + '</div>';
+        html += '</div></div>';
+        html += '<div style="display:flex;gap:6px;margin-top:12px">';
+        html += '<button class="btn btn-primary" onclick="showRedeemModal(' + r.id + ',\'' + escHtml(r.name) + '\',' + r.points_cost + ')" style="flex:1;font-size:12px"' + (r.is_active && r.stock !== 0 ? '' : ' disabled') + '>🎁 Tukar</button>';
+        html += '<button class="btn" onclick="showEditRewardModal(' + r.id + ')" style="font-size:12px;background:#f1f5f9;color:#334155">✏️</button>';
+        if (currentUser.role === 'owner') html += '<button class="btn" onclick="if(confirm(\'Hapus reward?\'))deleteReward(' + r.id + ')" style="font-size:12px;background:#fef2f2;color:#ef4444">🗑️</button>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
+    main.innerHTML = html;
+  } catch(e) { main.innerHTML = '<div class="alert alert-error">' + escHtml(e.message) + '</div>'; }
+}
+
+function showAddRewardModal() {
+  let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+  html += '<div class="modal" style="max-width:500px">';
+  html += '<div class="modal-header"><h3>➕ Tambah Reward</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+  html += '<div class="form-group"><label>Nama Reward *</label><input type="text" id="rewardName" placeholder="contoh: Diskon 10%"></div>';
+  html += '<div class="form-group"><label>Deskripsi</label><input type="text" id="rewardDesc" placeholder="Keterangan..."></div>';
+  html += '<div class="form-group"><label>Poin yang Dibutuhkan *</label><input type="number" id="rewardPointsCost" value="100" min="1"></div>';
+  html += '<div class="form-group"><label>Tipe Reward</label><select id="rewardType" onchange="toggleRewardValue()">';
+  html += '<option value="discount_fixed">💵 Potongan Harga (Rp)</option>';
+  html += '<option value="discount_percent">🏷️ Diskon (%)</option>';
+  html += '<option value="free_product">📦 Produk Gratis</option>';
+  html += '<option value="voucher">🎫 Voucher</option></select></div>';
+  html += '<div class="form-group" id="rewardValueGroup"><label>Nilai Reward</label><input type="number" id="rewardValue" value="10000" min="0"></div>';
+  html += '<div class="form-group"><label>Stok (-1 = unlimited)</label><input type="number" id="rewardStock" value="-1" min="-1"></div>';
+  html += '<button class="btn btn-primary" onclick="saveReward()" style="width:100%">💾 Simpan</button>';
+  html += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function toggleRewardValue() {
+  const type = document.getElementById('rewardType').value;
+  document.getElementById('rewardValueGroup').style.display = type === 'free_product' ? 'none' : '';
+}
+
+async function saveReward() {
+  const name = document.getElementById('rewardName').value.trim();
+  const points_cost = parseInt(document.getElementById('rewardPointsCost').value);
+  if (!name || !points_cost) return showToast('Nama dan poin wajib diisi!', 'error');
+  try {
+    await apiFetch('/api/rewards', { method: 'POST', body: JSON.stringify({
+      name, description: document.getElementById('rewardDesc').value.trim(),
+      points_cost, reward_type: document.getElementById('rewardType').value,
+      reward_value: parseFloat(document.getElementById('rewardValue').value) || 0,
+      stock: parseInt(document.getElementById('rewardStock').value)
+    })});
+    showToast('Reward berhasil ditambahkan!', 'success');
+    document.querySelector('.modal-overlay').remove();
+    renderRewards();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function showEditRewardModal(id) {
+  try {
+    const rewards = await apiFetch('/api/rewards');
+    const r = rewards.find(x => x.id === id);
+    if (!r) return showToast('Reward not found', 'error');
+    let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+    html += '<div class="modal" style="max-width:500px">';
+    html += '<div class="modal-header"><h3>✏️ Edit Reward</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+    html += '<div class="form-group"><label>Nama</label><input type="text" id="editRewardName" value="' + escHtml(r.name) + '"></div>';
+    html += '<div class="form-group"><label>Deskripsi</label><input type="text" id="editRewardDesc" value="' + escHtml(r.description || '') + '"></div>';
+    html += '<div class="form-group"><label>Poin</label><input type="number" id="editRewardPts" value="' + r.points_cost + '"></div>';
+    html += '<div class="form-group"><label>Tipe</label><select id="editRewardType">';
+    ['discount_fixed','discount_percent','free_product','voucher'].forEach(t => {
+      html += '<option value="' + t + '"' + (r.reward_type === t ? ' selected' : '') + '>' + t + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group"><label>Nilai</label><input type="number" id="editRewardVal" value="' + r.reward_value + '"></div>';
+    html += '<div class="form-group"><label>Stok</label><input type="number" id="editRewardStock" value="' + r.stock + '"></div>';
+    html += '<div class="form-group"><label><input type="checkbox" id="editRewardActive"' + (r.is_active ? ' checked' : '') + '> Aktif</label></div>';
+    html += '<button class="btn btn-primary" onclick="updateReward(' + id + ')" style="width:100%">💾 Update</button>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function updateReward(id) {
+  try {
+    await apiFetch('/api/rewards/' + id, { method: 'PUT', body: JSON.stringify({
+      name: document.getElementById('editRewardName').value.trim(),
+      description: document.getElementById('editRewardDesc').value.trim(),
+      points_cost: parseInt(document.getElementById('editRewardPts').value),
+      reward_type: document.getElementById('editRewardType').value,
+      reward_value: parseFloat(document.getElementById('editRewardVal').value) || 0,
+      stock: parseInt(document.getElementById('editRewardStock').value),
+      is_active: document.getElementById('editRewardActive').checked ? 1 : 0
+    })});
+    showToast('Reward berhasil diupdate!', 'success');
+    document.querySelector('.modal-overlay').remove();
+    renderRewards();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteReward(id) {
+  try {
+    await apiFetch('/api/rewards/' + id, { method: 'DELETE' });
+    showToast('Reward berhasil dihapus!', 'success');
+    renderRewards();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+function showRedeemModal(rewardId, rewardName, pointsCost) {
+  let html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()">';
+  html += '<div class="modal" style="max-width:450px">';
+  html += '<div class="modal-header"><h3>🎁 Tukar Reward</h3><button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button></div>';
+  html += '<div style="text-align:center;margin-bottom:16px"><div style="font-size:16px;font-weight:700">' + escHtml(rewardName) + '</div><div style="color:#8b5cf6;font-weight:600">🪙 ' + pointsCost + ' poin</div></div>';
+  html += '<div class="form-group"><label>Cari Member</label><input type="text" id="redeemMemberSearch" placeholder="Ketik nama/HP/kode..." oninput="searchRedeemMember(this.value,' + rewardId + ')"></div>';
+  html += '<div id="redeemMemberResults" style="margin-bottom:16px"></div>';
+  html += '<div id="redeemSelectedMember" style="display:none;background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:16px"></div>';
+  html += '<button class="btn btn-primary" id="redeemBtn" onclick="doRedeem(' + rewardId + ')" style="width:100%" disabled>🎁 Konfirmasi Tukar</button>';
+  html += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+let redeemCustomerId = null;
+async function searchRedeemMember(q, rewardId) {
+  if (q.length < 2) { document.getElementById('redeemMemberResults').innerHTML = ''; return; }
+  try {
+    const results = await apiFetch('/api/members/search/quick?q=' + encodeURIComponent(q));
+    let html = '';
+    results.forEach(m => {
+      html += '<div style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="selectRedeemMember(' + m.id + ',\'' + escHtml(m.name) + '\',' + m.points + ',\'' + escHtml(m.level_icon || '🥉') + ' ' + escHtml(m.level_name || 'Bronze') + '\')">';
+      html += '<div><strong>' + escHtml(m.name) + '</strong> <span style="font-size:11px;color:#64748b">' + escHtml(m.member_code) + '</span></div>';
+      html += '<div style="color:#8b5cf6;font-weight:600">🪙 ' + m.points + '</div></div>';
+    });
+    document.getElementById('redeemMemberResults').innerHTML = html || '<div style="color:#94a3b8;font-size:13px">Tidak ditemukan</div>';
+  } catch(e) { /* ignore */ }
+}
+
+function selectRedeemMember(id, name, points, levelText) {
+  redeemCustomerId = id;
+  document.getElementById('redeemMemberResults').innerHTML = '';
+  document.getElementById('redeemMemberSearch').value = name;
+  const el = document.getElementById('redeemSelectedMember');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="display:flex;justify-content:space-between"><div><strong>' + escHtml(name) + '</strong><br><span style="font-size:12px">' + levelText + '</span></div><div style="color:#8b5cf6;font-weight:700;font-size:18px">🪙 ' + points + '</div></div>';
+  document.getElementById('redeemBtn').disabled = false;
+}
+
+async function doRedeem(rewardId) {
+  if (!redeemCustomerId) return showToast('Pilih member dulu!', 'error');
+  try {
+    const result = await apiFetch('/api/rewards/' + rewardId + '/redeem', { method: 'POST', body: JSON.stringify({ customer_id: redeemCustomerId }) });
+    showToast('🎉 Reward berhasil ditukar! Sisa poin: ' + result.new_balance, 'success');
+    document.querySelector('.modal-overlay').remove();
+    redeemCustomerId = null;
+    renderRewards();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
 function updateOnlineStatus() {
   var online = navigator.onLine;
   var bar = document.getElementById('offlineBar');

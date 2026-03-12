@@ -473,6 +473,56 @@ async function runAutoMigrate() {
   // Fase 3: Expired Date
   await safeExec('products.expire_date', `ALTER TABLE products ADD COLUMN expire_date DATE DEFAULT NULL`);
   // Fase 2B: Harga Grosir
+  // Phase 4: Member & Reward System
+  await safeExec('Create member_levels', `CREATE TABLE IF NOT EXISTS member_levels (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    min_points INT DEFAULT 0,
+    discount_percent DECIMAL(5,2) DEFAULT 0,
+    color VARCHAR(7) DEFAULT '#3b82f6',
+    icon VARCHAR(10) DEFAULT '🥉',
+    sort_order INT DEFAULT 0
+  )`);
+  await safeExec('Seed member_levels', `INSERT IGNORE INTO member_levels (id, name, min_points, discount_percent, color, icon, sort_order) VALUES
+    (1, 'Bronze', 0, 0, '#cd7f32', '🥉', 1),
+    (2, 'Silver', 500, 2, '#c0c0c0', '🥈', 2),
+    (3, 'Gold', 2000, 5, '#ffd700', '🥇', 3),
+    (4, 'Platinum', 5000, 8, '#e5e4e2', '💎', 4)`);
+  await safeExec('Create rewards', `CREATE TABLE IF NOT EXISTS rewards (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    points_cost INT NOT NULL DEFAULT 100,
+    reward_type ENUM('discount_percent','discount_fixed','free_product','voucher') DEFAULT 'discount_fixed',
+    reward_value DECIMAL(15,2) DEFAULT 0,
+    stock INT DEFAULT -1,
+    is_active TINYINT DEFAULT 1,
+    image_url VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await safeExec('Create point_history', `CREATE TABLE IF NOT EXISTS point_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    type ENUM('earn','redeem','adjust','bonus') NOT NULL,
+    points INT NOT NULL,
+    balance_after INT DEFAULT 0,
+    reference_type VARCHAR(50) DEFAULT NULL,
+    reference_id INT DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    created_by VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_customer (customer_id),
+    INDEX idx_type (type)
+  )`);
+  await safeExec('customers.member_code', `ALTER TABLE customers ADD COLUMN member_code VARCHAR(20) DEFAULT NULL`);
+  await safeExec('customers.member_code_unique', `ALTER TABLE customers ADD UNIQUE INDEX idx_member_code (member_code)`);
+  await safeExec('customers.level_id', `ALTER TABLE customers ADD COLUMN level_id INT DEFAULT 1`);
+  await safeExec('customers.member_since', `ALTER TABLE customers ADD COLUMN member_since DATE DEFAULT (CURRENT_DATE)`);
+  await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
+  await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
+  // Point settings in settings table
+  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
     min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
@@ -717,7 +767,107 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('products.conversion_ratio', `ALTER TABLE products ADD COLUMN conversion_ratio DECIMAL(10,4) DEFAULT 1`);
   // Fase 3: Expired Date
   await safeExec('products.expire_date', `ALTER TABLE products ADD COLUMN expire_date DATE DEFAULT NULL`);
+  // Phase 4: Member & Reward System
+  await safeExec('Create member_levels', `CREATE TABLE IF NOT EXISTS member_levels (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    min_points INT DEFAULT 0,
+    discount_percent DECIMAL(5,2) DEFAULT 0,
+    color VARCHAR(7) DEFAULT '#3b82f6',
+    icon VARCHAR(10) DEFAULT '🥉',
+    sort_order INT DEFAULT 0
+  )`);
+  await safeExec('Seed member_levels', `INSERT IGNORE INTO member_levels (id, name, min_points, discount_percent, color, icon, sort_order) VALUES
+    (1, 'Bronze', 0, 0, '#cd7f32', '🥉', 1),
+    (2, 'Silver', 500, 2, '#c0c0c0', '🥈', 2),
+    (3, 'Gold', 2000, 5, '#ffd700', '🥇', 3),
+    (4, 'Platinum', 5000, 8, '#e5e4e2', '💎', 4)`);
+  await safeExec('Create rewards', `CREATE TABLE IF NOT EXISTS rewards (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    points_cost INT NOT NULL DEFAULT 100,
+    reward_type ENUM('discount_percent','discount_fixed','free_product','voucher') DEFAULT 'discount_fixed',
+    reward_value DECIMAL(15,2) DEFAULT 0,
+    stock INT DEFAULT -1,
+    is_active TINYINT DEFAULT 1,
+    image_url VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await safeExec('Create point_history', `CREATE TABLE IF NOT EXISTS point_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    type ENUM('earn','redeem','adjust','bonus') NOT NULL,
+    points INT NOT NULL,
+    balance_after INT DEFAULT 0,
+    reference_type VARCHAR(50) DEFAULT NULL,
+    reference_id INT DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    created_by VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_customer (customer_id),
+    INDEX idx_type (type)
+  )`);
+  await safeExec('customers.member_code', `ALTER TABLE customers ADD COLUMN member_code VARCHAR(20) DEFAULT NULL`);
+  await safeExec('customers.member_code_unique', `ALTER TABLE customers ADD UNIQUE INDEX idx_member_code (member_code)`);
+  await safeExec('customers.level_id', `ALTER TABLE customers ADD COLUMN level_id INT DEFAULT 1`);
+  await safeExec('customers.member_since', `ALTER TABLE customers ADD COLUMN member_since DATE DEFAULT (CURRENT_DATE)`);
+  await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
+  await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
+  // Point settings in settings table
+  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+
   // Fase 2B: Harga Grosir
+  // Phase 4: Member & Reward System
+  await safeExec('Create member_levels', `CREATE TABLE IF NOT EXISTS member_levels (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    min_points INT DEFAULT 0,
+    discount_percent DECIMAL(5,2) DEFAULT 0,
+    color VARCHAR(7) DEFAULT '#3b82f6',
+    icon VARCHAR(10) DEFAULT '🥉',
+    sort_order INT DEFAULT 0
+  )`);
+  await safeExec('Seed member_levels', `INSERT IGNORE INTO member_levels (id, name, min_points, discount_percent, color, icon, sort_order) VALUES
+    (1, 'Bronze', 0, 0, '#cd7f32', '🥉', 1),
+    (2, 'Silver', 500, 2, '#c0c0c0', '🥈', 2),
+    (3, 'Gold', 2000, 5, '#ffd700', '🥇', 3),
+    (4, 'Platinum', 5000, 8, '#e5e4e2', '💎', 4)`);
+  await safeExec('Create rewards', `CREATE TABLE IF NOT EXISTS rewards (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    points_cost INT NOT NULL DEFAULT 100,
+    reward_type ENUM('discount_percent','discount_fixed','free_product','voucher') DEFAULT 'discount_fixed',
+    reward_value DECIMAL(15,2) DEFAULT 0,
+    stock INT DEFAULT -1,
+    is_active TINYINT DEFAULT 1,
+    image_url VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await safeExec('Create point_history', `CREATE TABLE IF NOT EXISTS point_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    type ENUM('earn','redeem','adjust','bonus') NOT NULL,
+    points INT NOT NULL,
+    balance_after INT DEFAULT 0,
+    reference_type VARCHAR(50) DEFAULT NULL,
+    reference_id INT DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    created_by VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_customer (customer_id),
+    INDEX idx_type (type)
+  )`);
+  await safeExec('customers.member_code', `ALTER TABLE customers ADD COLUMN member_code VARCHAR(20) DEFAULT NULL`);
+  await safeExec('customers.member_code_unique', `ALTER TABLE customers ADD UNIQUE INDEX idx_member_code (member_code)`);
+  await safeExec('customers.level_id', `ALTER TABLE customers ADD COLUMN level_id INT DEFAULT 1`);
+  await safeExec('customers.member_since', `ALTER TABLE customers ADD COLUMN member_since DATE DEFAULT (CURRENT_DATE)`);
+  await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
+  await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
+  // Point settings in settings table
+  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
     min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
@@ -1269,6 +1419,11 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     }
 
     await conn.commit();
+
+    // Auto-add points if member is attached
+    if (customer_id) {
+      addPointsFromTransaction(customer_id, total, txId, userName).catch(e => console.error('Points error:', e));
+    }
 
     res.status(201).json({
       message: 'Transaksi berhasil!',
@@ -2223,6 +2378,284 @@ app.post('/api/products/import', authenticateToken, authorizeRole('admin', 'owne
     console.error('Import products error:', err);
     res.status(500).json({ error: 'Gagal import produk.' });
   }
+});
+
+
+// ============================
+// MEMBER & REWARD SYSTEM APIs
+// ============================
+
+// GET all members
+app.get('/api/members', authenticateToken, async (req, res) => {
+  try {
+    const { search, level_id, is_active } = req.query;
+    let sql = `SELECT c.*, ml.name as level_name, ml.color as level_color, ml.icon as level_icon, ml.discount_percent
+               FROM customers c LEFT JOIN member_levels ml ON c.level_id = ml.id WHERE 1=1`;
+    const params = [];
+    if (search) { sql += ` AND (c.name LIKE ? OR c.phone LIKE ? OR c.member_code LIKE ?)`; params.push('%'+search+'%','%'+search+'%','%'+search+'%'); }
+    if (level_id) { sql += ` AND c.level_id = ?`; params.push(level_id); }
+    if (is_active !== undefined) { sql += ` AND c.is_active = ?`; params.push(is_active); }
+    sql += ` ORDER BY c.points DESC, c.name ASC`;
+    const [rows] = await pool.query(sql, params);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET single member detail
+app.get('/api/members/:id', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT c.*, ml.name as level_name, ml.color as level_color, ml.icon as level_icon, ml.discount_percent
+       FROM customers c LEFT JOIN member_levels ml ON c.level_id = ml.id WHERE c.id = ?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Member not found' });
+    // Get recent transactions
+    const [txns] = await pool.query(
+      `SELECT id, total, payment_method, created_at FROM transactions WHERE customer_id = ? ORDER BY created_at DESC LIMIT 10`, [req.params.id]);
+    // Get point history
+    const [points] = await pool.query(
+      `SELECT * FROM point_history WHERE customer_id = ? ORDER BY created_at DESC LIMIT 20`, [req.params.id]);
+    // Get next level info
+    const [nextLevel] = await pool.query(
+      `SELECT * FROM member_levels WHERE min_points > ? ORDER BY min_points ASC LIMIT 1`, [rows[0].points]);
+    res.json({ ...rows[0], recent_transactions: txns, point_history: points, next_level: nextLevel[0] || null });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST create member
+app.post('/api/members', authenticateToken, async (req, res) => {
+  try {
+    const { name, phone, email, address, notes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nama wajib diisi' });
+    // Generate member code
+    const [countResult] = await pool.query('SELECT COUNT(*) as cnt FROM customers');
+    const code = 'MBR-' + String(countResult[0].cnt + 1).padStart(5, '0');
+    const [result] = await pool.query(
+      `INSERT INTO customers (name, phone, email, address, notes, member_code, level_id, points, member_since) VALUES (?, ?, ?, ?, ?, ?, 1, 0, CURRENT_DATE)`,
+      [name, phone || null, email || null, address || null, notes || null, code]);
+    res.json({ id: result.insertId, member_code: code });
+  } catch(e) { 
+    if (e.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Member dengan data ini sudah ada' });
+    res.status(500).json({ error: e.message }); 
+  }
+});
+
+// PUT update member
+app.put('/api/members/:id', authenticateToken, async (req, res) => {
+  try {
+    const { name, phone, email, address, notes, is_active } = req.body;
+    await pool.query(
+      `UPDATE customers SET name = ?, phone = ?, email = ?, address = ?, notes = ?, is_active = ? WHERE id = ?`,
+      [name, phone || null, email || null, address || null, notes || null, is_active !== undefined ? is_active : 1, req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE member
+app.delete('/api/members/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM point_history WHERE customer_id = ?', [req.params.id]);
+    await pool.query('DELETE FROM customers WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET member levels
+app.get('/api/member-levels', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM member_levels ORDER BY sort_order ASC');
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT update member level
+app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    const { name, min_points, discount_percent, color, icon } = req.body;
+    await pool.query(
+      'UPDATE member_levels SET name = ?, min_points = ?, discount_percent = ?, color = ?, icon = ? WHERE id = ?',
+      [name, min_points, discount_percent, color, icon, req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET point settings
+app.get('/api/settings/points', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT \`key\`, value FROM settings WHERE \`key\` IN ('points_per_amount','points_earn_ratio','points_enabled')");
+    const settings = {};
+    rows.forEach(r => settings[r.key] = r.value);
+    res.json(settings);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT update point settings
+app.put('/api/settings/points', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    const { points_per_amount, points_earn_ratio, points_enabled } = req.body;
+    if (points_per_amount !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_per_amount', ?) ON DUPLICATE KEY UPDATE value = ?", [points_per_amount, points_per_amount]);
+    if (points_earn_ratio !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_earn_ratio', ?) ON DUPLICATE KEY UPDATE value = ?", [points_earn_ratio, points_earn_ratio]);
+    if (points_enabled !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_enabled', ?) ON DUPLICATE KEY UPDATE value = ?", [points_enabled, points_enabled]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST adjust points manually
+app.post('/api/members/:id/adjust-points', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    const { points, description, type } = req.body;
+    const adjustType = type || (points >= 0 ? 'bonus' : 'adjust');
+    const [member] = await pool.query('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    if (!member.length) return res.status(404).json({ error: 'Member not found' });
+    const newBalance = member[0].points + points;
+    await pool.query('UPDATE customers SET points = ? WHERE id = ?', [Math.max(0, newBalance), req.params.id]);
+    await pool.query(
+      'INSERT INTO point_history (customer_id, type, points, balance_after, description, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, adjustType, points, Math.max(0, newBalance), description || 'Manual adjustment', req.user.name || req.user.username]);
+    // Auto update level
+    await autoUpdateMemberLevel(req.params.id);
+    res.json({ success: true, new_balance: Math.max(0, newBalance) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Helper: auto update member level based on points
+async function autoUpdateMemberLevel(customerId) {
+  try {
+    const [member] = await pool.query('SELECT points FROM customers WHERE id = ?', [customerId]);
+    if (!member.length) return;
+    const [levels] = await pool.query('SELECT * FROM member_levels ORDER BY min_points DESC');
+    for (const level of levels) {
+      if (member[0].points >= level.min_points) {
+        await pool.query('UPDATE customers SET level_id = ? WHERE id = ?', [level.id, customerId]);
+        break;
+      }
+    }
+  } catch(e) { console.error('Error updating member level:', e.message); }
+}
+
+// Helper: add points from transaction
+async function addPointsFromTransaction(customerId, totalAmount, txId, userName) {
+  try {
+    const [settings] = await pool.query("SELECT \`key\`, value FROM settings WHERE \`key\` IN ('points_per_amount','points_earn_ratio','points_enabled')");
+    const cfg = {};
+    settings.forEach(s => cfg[s.key] = s.value);
+    if (cfg.points_enabled !== '1') return;
+    const perAmount = parseInt(cfg.points_per_amount) || 10000;
+    const ratio = parseInt(cfg.points_earn_ratio) || 1;
+    const pointsEarned = Math.floor(totalAmount / perAmount) * ratio;
+    if (pointsEarned <= 0) return;
+    const [member] = await pool.query('SELECT points FROM customers WHERE id = ?', [customerId]);
+    if (!member.length) return;
+    const newBalance = member[0].points + pointsEarned;
+    await pool.query('UPDATE customers SET points = ?, total_transactions = total_transactions + 1, total_spent = total_spent + ? WHERE id = ?', [newBalance, totalAmount, customerId]);
+    await pool.query(
+      'INSERT INTO point_history (customer_id, type, points, balance_after, reference_type, reference_id, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [customerId, 'earn', pointsEarned, newBalance, 'transaction', txId, 'Belanja ' + totalAmount, userName]);
+    await autoUpdateMemberLevel(customerId);
+  } catch(e) { console.error('Error adding points:', e.message); }
+}
+
+// GET rewards catalog
+app.get('/api/rewards', authenticateToken, async (req, res) => {
+  try {
+    const { active_only } = req.query;
+    let sql = 'SELECT * FROM rewards';
+    if (active_only === '1') sql += ' WHERE is_active = 1';
+    sql += ' ORDER BY points_cost ASC';
+    const [rows] = await pool.query(sql);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST create reward
+app.post('/api/rewards', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    const { name, description, points_cost, reward_type, reward_value, stock } = req.body;
+    if (!name || !points_cost) return res.status(400).json({ error: 'Nama dan poin wajib diisi' });
+    const [result] = await pool.query(
+      'INSERT INTO rewards (name, description, points_cost, reward_type, reward_value, stock) VALUES (?, ?, ?, ?, ?, ?)',
+      [name, description || null, points_cost, reward_type || 'discount_fixed', reward_value || 0, stock !== undefined ? stock : -1]);
+    res.json({ id: result.insertId });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT update reward
+app.put('/api/rewards/:id', authenticateToken, authorizeRole('owner','admin'), async (req, res) => {
+  try {
+    const { name, description, points_cost, reward_type, reward_value, stock, is_active } = req.body;
+    await pool.query(
+      'UPDATE rewards SET name = ?, description = ?, points_cost = ?, reward_type = ?, reward_value = ?, stock = ?, is_active = ? WHERE id = ?',
+      [name, description, points_cost, reward_type, reward_value, stock, is_active, req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE reward
+app.delete('/api/rewards/:id', authenticateToken, authorizeRole('owner'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM rewards WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST redeem reward
+app.post('/api/rewards/:id/redeem', authenticateToken, async (req, res) => {
+  try {
+    const { customer_id } = req.body;
+    if (!customer_id) return res.status(400).json({ error: 'Customer ID wajib' });
+    const [reward] = await pool.query('SELECT * FROM rewards WHERE id = ? AND is_active = 1', [req.params.id]);
+    if (!reward.length) return res.status(404).json({ error: 'Reward tidak ditemukan' });
+    const [member] = await pool.query('SELECT * FROM customers WHERE id = ?', [customer_id]);
+    if (!member.length) return res.status(404).json({ error: 'Member tidak ditemukan' });
+    if (member[0].points < reward[0].points_cost) return res.status(400).json({ error: 'Poin tidak cukup. Dibutuhkan: ' + reward[0].points_cost + ', Tersedia: ' + member[0].points });
+    if (reward[0].stock === 0) return res.status(400).json({ error: 'Reward sudah habis' });
+    // Deduct points
+    const newBalance = member[0].points - reward[0].points_cost;
+    await pool.query('UPDATE customers SET points = ? WHERE id = ?', [newBalance, customer_id]);
+    // Update stock if limited
+    if (reward[0].stock > 0) await pool.query('UPDATE rewards SET stock = stock - 1 WHERE id = ?', [req.params.id]);
+    // Record history
+    await pool.query(
+      'INSERT INTO point_history (customer_id, type, points, balance_after, reference_type, reference_id, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [customer_id, 'redeem', -reward[0].points_cost, newBalance, 'reward', reward[0].id, 'Redeem: ' + reward[0].name, req.user.name || req.user.username]);
+    await autoUpdateMemberLevel(customer_id);
+    res.json({ success: true, new_balance: newBalance, reward: reward[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET point history for a member
+app.get('/api/members/:id/point-history', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM point_history WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50', [req.params.id]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Search members (for POS autocomplete)
+app.get('/api/members/search/quick', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    const [rows] = await pool.query(
+      `SELECT c.id, c.name, c.phone, c.member_code, c.points, ml.name as level_name, ml.icon as level_icon, ml.discount_percent
+       FROM customers c LEFT JOIN member_levels ml ON c.level_id = ml.id
+       WHERE c.is_active = 1 AND (c.name LIKE ? OR c.phone LIKE ? OR c.member_code LIKE ?) LIMIT 10`,
+      ['%'+q+'%', '%'+q+'%', '%'+q+'%']);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET member stats summary
+app.get('/api/members/stats/summary', authenticateToken, async (req, res) => {
+  try {
+    const [total] = await pool.query('SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1');
+    const [byLevel] = await pool.query(
+      `SELECT ml.name, ml.icon, ml.color, COUNT(c.id) as cnt 
+       FROM member_levels ml LEFT JOIN customers c ON c.level_id = ml.id AND c.is_active = 1
+       GROUP BY ml.id ORDER BY ml.sort_order`);
+    const [totalPoints] = await pool.query('SELECT COALESCE(SUM(points),0) as total FROM customers WHERE is_active = 1');
+    const [newThisMonth] = await pool.query("SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1 AND member_since >= DATE_FORMAT(CURDATE(), '%Y-%m-01')");
+    res.json({ total_members: total[0].cnt, by_level: byLevel, total_points_circulating: totalPoints[0].total, new_this_month: newThisMonth[0].cnt });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = app;
