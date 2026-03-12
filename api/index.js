@@ -541,7 +541,7 @@ async function runAutoMigrate() {
     end_date DATE DEFAULT NULL,
     is_active TINYINT DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_special (product_id, IFNULL(level_id,0), IFNULL(customer_id,0))
+    INDEX idx_special_lookup (product_id, level_id, customer_id)
   )`);
   // Fase 2B: Kasbon
   await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
@@ -904,7 +904,7 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
     end_date DATE DEFAULT NULL,
     is_active TINYINT DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_special (product_id, IFNULL(level_id,0), IFNULL(customer_id,0))
+    INDEX idx_special_lookup (product_id, level_id, customer_id)
   )`);
   // Fase 2B: Kasbon
   await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
@@ -2598,8 +2598,8 @@ app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), asy
       if (!product_id || special_price === undefined) return res.status(400).json({ error: 'product_id dan special_price wajib diisi' });
       // Upsert logic
       const [existing] = await pool.query(
-        'SELECT id FROM special_prices WHERE product_id = ? AND IFNULL(level_id,0) = ? AND IFNULL(customer_id,0) = ?',
-        [product_id, level_id || 0, customer_id || 0]
+        'SELECT id FROM special_prices WHERE product_id = ? AND (level_id <=> ?) AND (customer_id <=> ?)',
+        [product_id, level_id || null, customer_id || null]
       );
       if (existing.length > 0) {
         await pool.query(
@@ -2634,7 +2634,7 @@ app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), asy
         for (const p of prices) {
           if (!p.special_price || p.special_price <= 0) continue;
           await conn.query(
-            'INSERT INTO special_prices (product_id, level_id, customer_id, special_price, description, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE special_price = VALUES(special_price), description = VALUES(description), start_date = VALUES(start_date), end_date = VALUES(end_date), is_active = 1',
+            'INSERT INTO special_prices (product_id, level_id, customer_id, special_price, description, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1) ',
             [productId, p.level_id || null, p.customer_id || null, p.special_price, p.description || null, p.start_date || null, p.end_date || null]
           );
         }
