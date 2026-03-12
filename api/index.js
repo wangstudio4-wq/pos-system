@@ -529,6 +529,20 @@ async function runAutoMigrate() {
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
     min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
     UNIQUE KEY unique_tier (product_id, min_qty))`);
+  // Fase 4.2: Harga VIP / Spesial per Level & Customer
+  await safeExec('Create special_prices', `CREATE TABLE IF NOT EXISTS special_prices (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    level_id INT DEFAULT NULL,
+    customer_id INT DEFAULT NULL,
+    special_price DECIMAL(15,2) NOT NULL,
+    description VARCHAR(200) DEFAULT NULL,
+    start_date DATE DEFAULT NULL,
+    end_date DATE DEFAULT NULL,
+    is_active TINYINT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_special (product_id, IFNULL(level_id,0), IFNULL(customer_id,0))
+  )`);
   // Fase 2B: Kasbon
   await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -878,6 +892,20 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
     min_qty INT NOT NULL, price DECIMAL(15,2) NOT NULL,
     UNIQUE KEY unique_tier (product_id, min_qty))`);
+  // Fase 4.2: Harga VIP / Spesial per Level & Customer
+  await safeExec('Create special_prices', `CREATE TABLE IF NOT EXISTS special_prices (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    level_id INT DEFAULT NULL,
+    customer_id INT DEFAULT NULL,
+    special_price DECIMAL(15,2) NOT NULL,
+    description VARCHAR(200) DEFAULT NULL,
+    start_date DATE DEFAULT NULL,
+    end_date DATE DEFAULT NULL,
+    is_active TINYINT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_special (product_id, IFNULL(level_id,0), IFNULL(customer_id,0))
+  )`);
   // Fase 2B: Kasbon
   await safeExec('Create debts', `CREATE TABLE IF NOT EXISTS debts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -2511,7 +2539,135 @@ app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), asy
 });
 
 // GET point settings
-app.get('/api/settings/points', authenticateToken, async (req, res) => {
+
+  // ============ HARGA VIP / SPESIAL ============
+
+  // GET all special prices (with product & level names)
+  app.get('/api/special-prices', authenticateToken, async (req, res) => {
+    try {
+      const { product_id, level_id, customer_id } = req.query;
+      let sql = 'SELECT sp.*, p.name as product_name, p.price as normal_price, ml.name as level_name, ml.icon as level_icon, c.name as customer_name FROM special_prices sp LEFT JOIN products p ON sp.product_id = p.id LEFT JOIN member_levels ml ON sp.level_id = ml.id LEFT JOIN customers c ON sp.customer_id = c.id WHERE 1=1';
+      const params = [];
+      if (product_id) { sql += ' AND sp.product_id = ?'; params.push(product_id); }
+      if (level_id) { sql += ' AND sp.level_id = ?'; params.push(level_id); }
+      if (customer_id) { sql += ' AND sp.customer_id = ?'; params.push(customer_id); }
+      sql += ' ORDER BY sp.product_id, sp.level_id, sp.customer_id';
+      const [rows] = await pool.query(sql, params);
+      res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET special prices for a specific product
+  app.get('/api/special-prices/product/:productId', authenticateToken, async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        'SELECT sp.*, ml.name as level_name, ml.icon as level_icon, c.name as customer_name FROM special_prices sp LEFT JOIN member_levels ml ON sp.level_id = ml.id LEFT JOIN customers c ON sp.customer_id = c.id WHERE sp.product_id = ? ORDER BY sp.level_id, sp.customer_id',
+        [req.params.productId]
+      );
+      res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET applicable special prices for a member (used by POS)
+  app.get('/api/special-prices/for-member/:customerId', authenticateToken, async (req, res) => {
+    try {
+      const [customer] = await pool.query('SELECT id, level_id FROM customers WHERE id = ?', [req.params.customerId]);
+      if (!customer.length) return res.status(404).json({ error: 'Member tidak ditemukan' });
+      const cust = customer[0];
+      const today = new Date().toISOString().split('T')[0];
+      // Get prices: customer-specific OR level-based, active, and within date range
+      const [rows] = await pool.query(
+        'SELECT sp.product_id, sp.special_price, sp.level_id, sp.customer_id, sp.description FROM special_prices sp WHERE sp.is_active = 1 AND (sp.customer_id = ? OR (sp.customer_id IS NULL AND sp.level_id = ?)) AND (sp.start_date IS NULL OR sp.start_date <= ?) AND (sp.end_date IS NULL OR sp.end_date >= ?) ORDER BY sp.customer_id DESC, sp.level_id DESC',
+        [cust.id, cust.level_id, today, today]
+      );
+      // Deduplicate: customer-specific overrides level-based (already sorted)
+      const priceMap = {};
+      for (const r of rows) {
+        if (!priceMap[r.product_id]) {
+          priceMap[r.product_id] = { product_id: r.product_id, special_price: Number(r.special_price), description: r.description, is_customer_specific: r.customer_id !== null };
+        }
+      }
+      res.json(Object.values(priceMap));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // POST create/update special price
+  app.post('/api/special-prices', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+    try {
+      const { product_id, level_id, customer_id, special_price, description, start_date, end_date, is_active } = req.body;
+      if (!product_id || special_price === undefined) return res.status(400).json({ error: 'product_id dan special_price wajib diisi' });
+      // Upsert logic
+      const [existing] = await pool.query(
+        'SELECT id FROM special_prices WHERE product_id = ? AND IFNULL(level_id,0) = ? AND IFNULL(customer_id,0) = ?',
+        [product_id, level_id || 0, customer_id || 0]
+      );
+      if (existing.length > 0) {
+        await pool.query(
+          'UPDATE special_prices SET special_price = ?, description = ?, start_date = ?, end_date = ?, is_active = ? WHERE id = ?',
+          [special_price, description || null, start_date || null, end_date || null, is_active !== undefined ? is_active : 1, existing[0].id]
+        );
+        res.json({ success: true, id: existing[0].id, action: 'updated' });
+      } else {
+        const [result] = await pool.query(
+          'INSERT INTO special_prices (product_id, level_id, customer_id, special_price, description, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [product_id, level_id || null, customer_id || null, special_price, description || null, start_date || null, end_date || null, is_active !== undefined ? is_active : 1]
+        );
+        res.json({ success: true, id: result.insertId, action: 'created' });
+      }
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // POST batch update special prices for a product
+  app.post('/api/special-prices/batch/:productId', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+    try {
+      const productId = req.params.productId;
+      const { prices } = req.body; // Array of { level_id, customer_id, special_price, description, start_date, end_date }
+      if (!prices || !Array.isArray(prices)) return res.status(400).json({ error: 'prices array wajib diisi' });
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        // Remove old level-based prices for this product (keep customer-specific if not in batch)
+        const levelIds = prices.filter(p => p.level_id && !p.customer_id).map(p => p.level_id);
+        if (levelIds.length > 0) {
+          await conn.query('DELETE FROM special_prices WHERE product_id = ? AND customer_id IS NULL', [productId]);
+        }
+        for (const p of prices) {
+          if (!p.special_price || p.special_price <= 0) continue;
+          await conn.query(
+            'INSERT INTO special_prices (product_id, level_id, customer_id, special_price, description, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE special_price = VALUES(special_price), description = VALUES(description), start_date = VALUES(start_date), end_date = VALUES(end_date), is_active = 1',
+            [productId, p.level_id || null, p.customer_id || null, p.special_price, p.description || null, p.start_date || null, p.end_date || null]
+          );
+        }
+        await conn.commit();
+        const [rows] = await conn.query('SELECT sp.*, ml.name as level_name, ml.icon as level_icon FROM special_prices sp LEFT JOIN member_levels ml ON sp.level_id = ml.id WHERE sp.product_id = ?', [productId]);
+        res.json({ success: true, prices: rows });
+      } catch (err) { await conn.rollback(); throw err; }
+      finally { conn.release(); }
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // DELETE special price
+  app.get('/api/special-prices/stats', authenticateToken, async (req, res) => {
+    try {
+      const [stats] = await pool.query(
+        'SELECT COUNT(DISTINCT product_id) as products_with_special, COUNT(*) as total_special_prices, COUNT(DISTINCT level_id) as levels_configured, COUNT(DISTINCT customer_id) as customers_with_vip FROM special_prices WHERE is_active = 1'
+      );
+      res.json(stats[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); 
+
+  app.delete('/api/special-prices/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
+    try {
+      await pool.query('DELETE FROM special_prices WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET special price summary stats
+  }
+  });
+
+
+  app.get('/api/settings/points', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT points_enabled, points_per_amount, points_earn_ratio FROM settings WHERE id = 1");
     if (!rows.length) return res.json({ points_enabled: 1, points_per_amount: 10000, points_earn_ratio: 1 });
