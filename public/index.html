@@ -401,8 +401,10 @@ tbody tr:hover { background: #f8fafc; }
 .pos-cart {
   width: 380px; flex-shrink: 0; display: flex; flex-direction: column;
   background: var(--white); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg); overflow: hidden;
+  box-shadow: var(--shadow-lg);
   border: 1px solid rgba(0,0,0,.04);
+  overflow: hidden;
+  min-height: 0;
 }
 .pos-search { display: flex; gap: 8px; margin-bottom: 14px; }
 .pos-search input {
@@ -453,7 +455,7 @@ tbody tr:hover { background: #f8fafc; }
   color: #fff;
 }
 .cart-header h3 { font-size: 14px; font-weight: 700; }
-.cart-items { flex: 1 1 0; overflow-y: auto; padding: 6px 12px; min-height: 60px; }
+.cart-items { flex: 1 1 auto; overflow-y: auto; padding: 6px 12px; min-height: 120px; }
 .cart-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 0;
   border-bottom: 1px solid #f1f5f9; font-size: 12px;
@@ -485,7 +487,7 @@ tbody tr:hover { background: #f8fafc; }
 .cart-empty { text-align: center; padding: 20px 12px; color: var(--text-secondary); }
 .cart-empty .empty-icon { font-size: 36px; margin-bottom: 4px; opacity: .5; }
 
-.cart-summary { padding: 12px 14px; border-top: 2px solid var(--border); background: #f8fafc; flex: 0 1 auto; overflow-y: auto; min-height: 200px; }
+.cart-summary { padding: 10px 12px; border-top: 2px solid var(--border); background: #f8fafc; flex: 0 1 auto; overflow-y: auto; max-height: 50%; }
 .summary-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
 .summary-row.total {
   font-size: 18px; font-weight: 800; color: var(--primary);
@@ -636,7 +638,7 @@ tbody tr:hover { background: #f8fafc; }
   .sidebar-overlay.show { display: block; }
   .main-content { margin-left: 0; padding: 70px 12px 14px; max-width: 100vw; overflow-x: hidden; }
   .pos-layout { flex-direction: column; height: auto; }
-  .pos-cart { width: 100%; }
+  .pos-cart { width: 100%; height: 60vh; min-height: 400px; }
   .dash-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2,1fr); }
   .login-card { padding: 32px 24px; }
