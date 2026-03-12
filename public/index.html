@@ -5323,7 +5323,7 @@ let memberLevels = [];
 let selectedMember = null;
 
 async function renderMembers() {
-  const main = document.getElementById('main');
+  const main = document.getElementById('mainContent');
   main.innerHTML = '<div style="text-align:center;padding:60px"><div class="spinner"></div><p>Memuat data member...</p></div>';
   try {
     const [stats, levels] = await Promise.all([
@@ -5629,7 +5629,7 @@ async function saveLevelSetting(id) {
 // REWARDS MANAGEMENT
 // ============================
 async function renderRewards() {
-  const main = document.getElementById('main');
+  const main = document.getElementById('mainContent');
   main.innerHTML = '<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
   try {
     const rewards = await apiFetch('/api/rewards');
