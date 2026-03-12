@@ -453,7 +453,7 @@ tbody tr:hover { background: #f8fafc; }
   color: #fff;
 }
 .cart-header h3 { font-size: 14px; font-weight: 700; }
-.cart-items { flex: 1; overflow-y: auto; padding: 6px 12px; min-height: 120px; }
+.cart-items { flex: 1 1 0; overflow-y: auto; padding: 6px 12px; min-height: 60px; }
 .cart-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 0;
   border-bottom: 1px solid #f1f5f9; font-size: 12px;
@@ -485,7 +485,7 @@ tbody tr:hover { background: #f8fafc; }
 .cart-empty { text-align: center; padding: 20px 12px; color: var(--text-secondary); }
 .cart-empty .empty-icon { font-size: 36px; margin-bottom: 4px; opacity: .5; }
 
-.cart-summary { padding: 12px 14px; border-top: 2px solid var(--border); background: #f8fafc; }
+.cart-summary { padding: 12px 14px; border-top: 2px solid var(--border); background: #f8fafc; flex: 0 1 auto; overflow-y: auto; min-height: 200px; }
 .summary-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
 .summary-row.total {
   font-size: 18px; font-weight: 800; color: var(--primary);
@@ -2258,7 +2258,8 @@ function renderCartPanel() {
   }
   html += '</div>';
 
-  // Summary
+  // Summary (member + totals + payment all in one scrollable area)
+  html += '<div class="cart-summary">';
   // Member selection
   html += '<div style="background:linear-gradient(135deg,#8b5cf622,#8b5cf608);border:1px solid #c4b5fd;border-radius:10px;padding:10px;margin-bottom:10px">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#7c3aed">👥 Member</span>';
@@ -2278,7 +2279,6 @@ function renderCartPanel() {
   }
   html += '</div>';
 
-  html += '<div class="cart-summary">';
   html += '<div class="summary-row"><span>Subtotal</span><span>' + formatRp(subtotal) + '</span></div>';
   html += '<div class="discount-input"><label>Diskon:</label><input type="number" id="cartDiscount" min="0" value="' + totalDiscount + '" onchange="updateCartUI()" placeholder="0"></div>';
   if (appSettings.tax_enabled && taxAmt > 0) {
@@ -5287,15 +5287,17 @@ var _isOnline = navigator.onLine;
 
 
 // POS Member search helpers
+let _posMemberResults = [];
 async function searchPOSMember(q) {
   const results = document.getElementById('posMemberResults');
   if (!results) return;
-  if (q.length < 2) { results.innerHTML = ''; return; }
+  if (q.length < 2) { results.innerHTML = ''; _posMemberResults = []; return; }
   try {
     const members = await apiFetch('/api/members/search/quick?q=' + encodeURIComponent(q));
+    _posMemberResults = members;
     let html = '';
-    members.forEach(m => {
-      html += '<div style="padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;margin-top:4px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:center" onclick="selectPOSMember(' + JSON.stringify(JSON.stringify(m)).slice(1,-1) + ')">';
+    members.forEach((m, idx) => {
+      html += '<div style="padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;margin-top:4px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:center" onclick="selectPOSMember(' + idx + ')">';
       html += '<div>' + (m.level_icon || '🥉') + ' <strong>' + escHtml(m.name) + '</strong> <span style="color:#64748b">' + escHtml(m.member_code || '') + '</span></div>';
       html += '<span style="color:#8b5cf6;font-weight:600">🪙' + m.points + '</span></div>';
     });
@@ -5303,8 +5305,10 @@ async function searchPOSMember(q) {
   } catch(e) { /* ignore */ }
 }
 
-function selectPOSMember(memberJson) {
-  selectedPOSMember = typeof memberJson === 'string' ? JSON.parse(memberJson) : memberJson;
+function selectPOSMember(idx) {
+  const m = typeof idx === 'number' ? _posMemberResults[idx] : idx;
+  if (!m) return;
+  selectedPOSMember = m;
   updateCartUI();
   showToast('👥 Member ' + selectedPOSMember.name + ' dipilih! Disc ' + (selectedPOSMember.discount_percent || 0) + '%', 'success');
 }
