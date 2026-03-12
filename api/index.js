@@ -521,7 +521,9 @@ async function runAutoMigrate() {
   await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
   await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
   // Point settings in settings table
-  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+  await safeExec('settings.points_enabled', "ALTER TABLE settings ADD COLUMN points_enabled TINYINT(1) DEFAULT 1");
+  await safeExec('settings.points_per_amount', "ALTER TABLE settings ADD COLUMN points_per_amount INT DEFAULT 10000");
+  await safeExec('settings.points_earn_ratio', "ALTER TABLE settings ADD COLUMN points_earn_ratio INT DEFAULT 1");
 
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
@@ -815,7 +817,9 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
   await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
   // Point settings in settings table
-  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+  await safeExec('settings.points_enabled', "ALTER TABLE settings ADD COLUMN points_enabled TINYINT(1) DEFAULT 1");
+  await safeExec('settings.points_per_amount', "ALTER TABLE settings ADD COLUMN points_per_amount INT DEFAULT 10000");
+  await safeExec('settings.points_earn_ratio', "ALTER TABLE settings ADD COLUMN points_earn_ratio INT DEFAULT 1");
 
   // Fase 2B: Harga Grosir
   // Phase 4: Member & Reward System
@@ -866,7 +870,9 @@ app.get('/api/auto-migrate', authenticateToken, authorizeRole('owner'), async (r
   await safeExec('customers.is_active', `ALTER TABLE customers ADD COLUMN is_active TINYINT DEFAULT 1`);
   await safeExec('customers.notes', `ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT NULL`);
   // Point settings in settings table
-  await safeExec('settings.points_per_amount', "INSERT IGNORE INTO settings (\`key\`, value) VALUES ('points_per_amount', '10000'), ('points_earn_ratio', '1'), ('points_enabled', '1')");
+  await safeExec('settings.points_enabled', "ALTER TABLE settings ADD COLUMN points_enabled TINYINT(1) DEFAULT 1");
+  await safeExec('settings.points_per_amount', "ALTER TABLE settings ADD COLUMN points_per_amount INT DEFAULT 10000");
+  await safeExec('settings.points_earn_ratio', "ALTER TABLE settings ADD COLUMN points_earn_ratio INT DEFAULT 1");
 
   await safeExec('Create price_tiers', `CREATE TABLE IF NOT EXISTS price_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY, product_id INT NOT NULL,
@@ -2507,10 +2513,13 @@ app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), asy
 // GET point settings
 app.get('/api/settings/points', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT \`key\`, value FROM settings WHERE \`key\` IN ('points_per_amount','points_earn_ratio','points_enabled')");
-    const settings = {};
-    rows.forEach(r => settings[r.key] = r.value);
-    res.json(settings);
+    const [rows] = await pool.query("SELECT points_enabled, points_per_amount, points_earn_ratio FROM settings WHERE id = 1");
+    if (!rows.length) return res.json({ points_enabled: 1, points_per_amount: 10000, points_earn_ratio: 1 });
+    res.json({
+      points_enabled: rows[0].points_enabled ? '1' : '0',
+      points_per_amount: String(rows[0].points_per_amount || 10000),
+      points_earn_ratio: String(rows[0].points_earn_ratio || 1)
+    });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2518,9 +2527,12 @@ app.get('/api/settings/points', authenticateToken, async (req, res) => {
 app.put('/api/settings/points', authenticateToken, authorizeRole('owner'), async (req, res) => {
   try {
     const { points_per_amount, points_earn_ratio, points_enabled } = req.body;
-    if (points_per_amount !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_per_amount', ?) ON DUPLICATE KEY UPDATE value = ?", [points_per_amount, points_per_amount]);
-    if (points_earn_ratio !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_earn_ratio', ?) ON DUPLICATE KEY UPDATE value = ?", [points_earn_ratio, points_earn_ratio]);
-    if (points_enabled !== undefined) await pool.query("INSERT INTO settings (\`key\`, value) VALUES ('points_enabled', ?) ON DUPLICATE KEY UPDATE value = ?", [points_enabled, points_enabled]);
+    const updates = [];
+    const vals = [];
+    if (points_per_amount !== undefined) { updates.push('points_per_amount = ?'); vals.push(points_per_amount); }
+    if (points_earn_ratio !== undefined) { updates.push('points_earn_ratio = ?'); vals.push(points_earn_ratio); }
+    if (points_enabled !== undefined) { updates.push('points_enabled = ?'); vals.push(points_enabled); }
+    if (updates.length) await pool.query('UPDATE settings SET ' + updates.join(', ') + ' WHERE id = 1', vals);
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -2561,12 +2573,10 @@ async function autoUpdateMemberLevel(customerId) {
 // Helper: add points from transaction
 async function addPointsFromTransaction(customerId, totalAmount, txId, userName) {
   try {
-    const [settings] = await pool.query("SELECT \`key\`, value FROM settings WHERE \`key\` IN ('points_per_amount','points_earn_ratio','points_enabled')");
-    const cfg = {};
-    settings.forEach(s => cfg[s.key] = s.value);
-    if (cfg.points_enabled !== '1') return;
-    const perAmount = parseInt(cfg.points_per_amount) || 10000;
-    const ratio = parseInt(cfg.points_earn_ratio) || 1;
+    const [settings] = await pool.query("SELECT points_enabled, points_per_amount, points_earn_ratio FROM settings WHERE id = 1");
+    if (!settings.length || !settings[0].points_enabled) return;
+    const perAmount = settings[0].points_per_amount || 10000;
+    const ratio = settings[0].points_earn_ratio || 1;
     const pointsEarned = Math.floor(totalAmount / perAmount) * ratio;
     if (pointsEarned <= 0) return;
     const [member] = await pool.query('SELECT points FROM customers WHERE id = ?', [customerId]);
