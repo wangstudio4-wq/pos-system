@@ -2402,6 +2402,32 @@ app.get('/api/members', authenticateToken, async (req, res) => {
 });
 
 // GET single member detail
+app.get('/api/members/search/quick', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    const [rows] = await pool.query(
+      `SELECT c.id, c.name, c.phone, c.member_code, c.points, ml.name as level_name, ml.icon as level_icon, ml.discount_percent
+       FROM customers c LEFT JOIN member_levels ml ON c.level_id = ml.id
+       WHERE c.is_active = 1 AND (c.name LIKE ? OR c.phone LIKE ? OR c.member_code LIKE ?) LIMIT 10`,
+      ['%'+q+'%', '%'+q+'%', '%'+q+'%']);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/members/stats/summary', authenticateToken, async (req, res) => {
+  try {
+    const [total] = await pool.query('SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1');
+    const [byLevel] = await pool.query(
+      `SELECT ml.name, ml.icon, ml.color, COUNT(c.id) as cnt 
+       FROM member_levels ml LEFT JOIN customers c ON c.level_id = ml.id AND c.is_active = 1
+       GROUP BY ml.id ORDER BY ml.sort_order`);
+    const [totalPoints] = await pool.query('SELECT COALESCE(SUM(points),0) as total FROM customers WHERE is_active = 1');
+    const [newThisMonth] = await pool.query("SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1 AND member_since >= DATE_FORMAT(CURDATE(), '%Y-%m-01')");
+    res.json({ total_members: total[0].cnt, by_level: byLevel, total_points_circulating: totalPoints[0].total, new_this_month: newThisMonth[0].cnt });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/members/:id', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -2631,31 +2657,7 @@ app.get('/api/members/:id/point-history', authenticateToken, async (req, res) =>
 });
 
 // Search members (for POS autocomplete)
-app.get('/api/members/search/quick', authenticateToken, async (req, res) => {
-  try {
-    const { q } = req.query;
-    if (!q) return res.json([]);
-    const [rows] = await pool.query(
-      `SELECT c.id, c.name, c.phone, c.member_code, c.points, ml.name as level_name, ml.icon as level_icon, ml.discount_percent
-       FROM customers c LEFT JOIN member_levels ml ON c.level_id = ml.id
-       WHERE c.is_active = 1 AND (c.name LIKE ? OR c.phone LIKE ? OR c.member_code LIKE ?) LIMIT 10`,
-      ['%'+q+'%', '%'+q+'%', '%'+q+'%']);
-    res.json(rows);
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
 
 // GET member stats summary
-app.get('/api/members/stats/summary', authenticateToken, async (req, res) => {
-  try {
-    const [total] = await pool.query('SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1');
-    const [byLevel] = await pool.query(
-      `SELECT ml.name, ml.icon, ml.color, COUNT(c.id) as cnt 
-       FROM member_levels ml LEFT JOIN customers c ON c.level_id = ml.id AND c.is_active = 1
-       GROUP BY ml.id ORDER BY ml.sort_order`);
-    const [totalPoints] = await pool.query('SELECT COALESCE(SUM(points),0) as total FROM customers WHERE is_active = 1');
-    const [newThisMonth] = await pool.query("SELECT COUNT(*) as cnt FROM customers WHERE is_active = 1 AND member_since >= DATE_FORMAT(CURDATE(), '%Y-%m-01')");
-    res.json({ total_members: total[0].cnt, by_level: byLevel, total_points_circulating: totalPoints[0].total, new_this_month: newThisMonth[0].cnt });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
 
 module.exports = app;
