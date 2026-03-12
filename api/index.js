@@ -2646,24 +2646,22 @@ app.put('/api/member-levels/:id', authenticateToken, authorizeRole('owner'), asy
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // DELETE special price
+  // GET special prices stats
   app.get('/api/special-prices/stats', authenticateToken, async (req, res) => {
     try {
       const [stats] = await pool.query(
         'SELECT COUNT(DISTINCT product_id) as products_with_special, COUNT(*) as total_special_prices, COUNT(DISTINCT level_id) as levels_configured, COUNT(DISTINCT customer_id) as customers_with_vip FROM special_prices WHERE is_active = 1'
       );
       res.json(stats[0]);
-    } catch (err) { res.status(500).json({ error: err.message }); 
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
 
+  // DELETE special price
   app.delete('/api/special-prices/:id', authenticateToken, authorizeRole('admin', 'owner'), async (req, res) => {
     try {
       await pool.query('DELETE FROM special_prices WHERE id = ?', [req.params.id]);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
-  });
-
-  // GET special price summary stats
-  }
   });
 
 
