@@ -25,6 +25,7 @@ const stockOpnameRoutes = require('../routes/stock-opname');
 const stockMovementRoutes = require('../routes/stock-movements');
 const importProductRoutes = require('../routes/import-products');
 const memberRoutes = require('../routes/members');
+const customerRoutes = require('../routes/customers');
 const utilityRoutes = require('../routes/utilities');
 
 const app = express();
@@ -113,6 +114,7 @@ app.use('/api/stock-purchases', stockPurchaseRoutes);
 app.use('/api/stock-opname', stockOpnameRoutes);
 app.use('/api/stock-movements', stockMovementRoutes);
 app.use('/api/products', importProductRoutes);  // /api/products/import
+app.use('/api/customers', customerRoutes);
 app.use('/api', memberRoutes);           // /api/members + /api/member-levels + /api/rewards + /api/special-prices
 app.use('/api', utilityRoutes);          // /api/sync + /api/auto-migrate + /sw.js
 

@@ -413,6 +413,4 @@ router.get('/members/:id/point-history', authenticateToken, async (req, res) => 
 
 // GET member stats summary
 
-module.exports = app;
-
 module.exports = router;
