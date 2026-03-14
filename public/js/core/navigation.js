@@ -23,6 +23,7 @@ const NAV_ITEMS = [
   { id: 'vipprices', icon: '👑', label: 'Harga VIP', roles: ['owner','admin'] },
   { id: 'importproducts', icon: '📤', label: 'Import Produk', roles: ['owner','admin'] },
   { id: 'users', icon: '👤', label: 'Kelola User', roles: ['owner'] },
+  { id: 'modules', icon: '🧩', label: 'Module Manager', roles: ['owner'] },
   { id: 'settings', icon: '⚙️', label: 'Pengaturan', roles: ['owner'] },
   { id: 'password', icon: '🔑', label: 'Ganti Password', roles: ['owner','admin'] },
 ];
@@ -76,6 +77,7 @@ function navigateTo(page) {
     restock: renderRestockAlert,
     importproducts: renderImportProducts,
     users: renderUsers,
+    modules: renderModuleManager,
     settings: renderSettings,
     password: renderPassword,
     changepin: renderChangePin,

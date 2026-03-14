@@ -223,6 +223,35 @@ async function runAutoMigrate() {
     end_date DATE DEFAULT NULL,
     is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  // === Module System Tables ===
+  await safeExec('Create modules', `CREATE TABLE IF NOT EXISTS modules (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    version VARCHAR(20) DEFAULT '1.0.0',
+    category VARCHAR(50) DEFAULT 'general',
+    is_enabled TINYINT(1) DEFAULT 0,
+    is_core TINYINT(1) DEFAULT 0,
+    config JSON DEFAULT NULL,
+    dependencies JSON DEFAULT NULL,
+    sort_order INT DEFAULT 0,
+    installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+
+  await safeExec('Create module_migrations', `CREATE TABLE IF NOT EXISTS module_migrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    module_id VARCHAR(50) NOT NULL,
+    version VARCHAR(20) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_module_version (module_id, version))`);
+
+  // Seed core modules (always enabled, can't be disabled)
+  await safeExec('Seed core modules', `INSERT IGNORE INTO modules (id, name, description, category, is_enabled, is_core, sort_order) VALUES
+    ('core-pos', 'Point of Sale', 'Kasir & transaksi penjualan', 'core', 1, 1, 1),
+    ('core-products', 'Produk & Kategori', 'Manajemen produk dan kategori', 'core', 1, 1, 2),
+    ('core-reports', 'Laporan Dasar', 'Laporan penjualan harian', 'core', 1, 1, 3),
+    ('core-users', 'User & Shift', 'Manajemen user, shift, dan kasir', 'core', 1, 1, 4)`);
+
   console.log('✅ Auto-migrate completed');
 }
 const migrationReady = runAutoMigrate().catch(err => console.error('Migration error:', err));
