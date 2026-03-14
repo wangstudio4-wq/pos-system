@@ -80,7 +80,18 @@ function navigateTo(page) {
     password: renderPassword,
     changepin: renderChangePin,
   };
-  if (renderers[page]) renderers[page]();
+  if (renderers[page]) {
+    try {
+      const result = renderers[page]();
+      if (result && result.catch) result.catch(function(err) {
+        main.innerHTML = '<div class="alert-box alert-warning">Gagal memuat halaman: ' + escHtml(err.message) + '</div>';
+      });
+    } catch(err) {
+      main.innerHTML = '<div class="alert-box alert-warning">Error: ' + escHtml(err.message) + '</div>';
+    }
+  } else {
+    main.innerHTML = '<div class="alert-box alert-warning">Halaman "' + escHtml(page) + '" belum tersedia. Pastikan file JS sudah ter-upload.</div>';
+  }
 }
 
 function toggleSidebar() {

@@ -27,8 +27,12 @@ const importProductRoutes = require('../routes/import-products');
 const memberRoutes = require('../routes/members');
 const customerRoutes = require('../routes/customers');
 const utilityRoutes = require('../routes/utilities');
+const moduleRoutes = require('../routes/modules');
+
+const hooks = require('../core/hooks');
 
 const app = express();
+app.set('hooks', hooks);  // Available via req.app.get('hooks') in routes
 
 // Middleware
 app.use(cors());
@@ -117,6 +121,7 @@ app.use('/api/products', importProductRoutes);  // /api/products/import
 app.use('/api/customers', customerRoutes);
 app.use('/api', memberRoutes);           // /api/members + /api/member-levels + /api/rewards + /api/special-prices
 app.use('/api', utilityRoutes);          // /api/sync + /api/auto-migrate + /sw.js
+app.use('/api/modules', moduleRoutes);   // /api/modules + /api/modules/enabled
 
 // Serve frontend
 const path = require('path');

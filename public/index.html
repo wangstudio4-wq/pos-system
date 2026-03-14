@@ -1044,6 +1044,8 @@ body.printing-mode > *:not(#printOverlay) { display: none !important; }
 
 
 <!-- Core JS Modules -->
+<script src="js/core/hooks.js"></script>
+<script src="js/core/module-loader.js"></script>
 <script src="js/core/utils.js"></script>
 <script src="js/core/auth.js"></script>
 <script src="js/core/navigation.js"></script>
@@ -1108,6 +1110,18 @@ fetch(API + '/api/store-info').then(r => r.json()).then(info => {
 
 <script>
 // ============ INIT ============
+console.log('[DIAG] INIT starting...');
+// Load modules (non-blocking, core works without modules)
+ModuleLoader.init().catch(e => console.warn('[ModuleLoader]', e));
+console.log('[DIAG] typeof renderDashboard:', typeof renderDashboard);
+console.log('[DIAG] typeof renderPOS:', typeof renderPOS);
+console.log('[DIAG] typeof renderHistory:', typeof renderHistory);
+console.log('[DIAG] typeof renderProducts:', typeof renderProducts);
+console.log('[DIAG] typeof renderMembers:', typeof renderMembers);
+console.log('[DIAG] typeof apiFetch:', typeof apiFetch);
+console.log('[DIAG] typeof navigateTo:', typeof navigateTo);
+console.log('[DIAG] typeof checkAuth:', typeof checkAuth);
+console.log('[DIAG] token:', token ? 'exists' : 'null');
 checkAuth();
 openOfflineDb().then(function() { updatePendingBadge(); updateOnlineStatus(); cachePOSData(); }).catch(function() {});
 
