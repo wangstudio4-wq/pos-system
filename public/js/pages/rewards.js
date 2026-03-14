@@ -177,16 +177,3 @@ async function doRedeem(rewardId) {
     renderRewards();
   } catch(e) { showToast(e.message, 'error'); }
 }
-
-
-</script>
-
-<!-- Core: Shortcuts & Offline -->
-<script src="js/core/shortcuts.js"></script>
-<script src="js/core/offline.js"></script>
-    <script src="js/pages/history.js"></script>
-    <script src="js/pages/dashboard.js"></script>
-    <script src="js/pages/pos.js"></script>
-    <script src="js/pages/products.js"></script>
-
-<script>
