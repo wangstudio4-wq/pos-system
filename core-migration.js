@@ -251,7 +251,8 @@ async function runAutoMigrate() {
     ('core-products', 'Produk & Kategori', 'Manajemen produk dan kategori', 'core', 1, 1, 2),
     ('core-reports', 'Laporan Dasar', 'Laporan penjualan harian', 'core', 1, 1, 3),
     ('core-users', 'User & Shift', 'Manajemen user, shift, dan kasir', 'core', 1, 1, 4),
-    ('vip-pricing', 'Harga VIP', 'Harga khusus per level member atau per pelanggan', 'pricing', 1, 0, 10)`);
+    ('vip-pricing', 'Harga VIP', 'Harga khusus per level member atau per pelanggan', 'pricing', 1, 0, 10),
+    ('rewards-loyalty', 'Rewards & Loyalty', 'Sistem poin, rewards catalog & redeem', 'loyalty', 1, 0, 11)`);
 
   console.log('✅ Auto-migrate completed');
 }
