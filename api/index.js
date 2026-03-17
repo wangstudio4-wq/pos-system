@@ -34,6 +34,7 @@ const hooks = require('../core/hooks');
 const BackendModuleLoader = require('../core/module-loader');
 
 const app = express();
+app.set('db', pool);      // Available via req.app.get('db') in routes
 app.set('hooks', hooks);  // Available via req.app.get('hooks') in routes
 
 // Middleware
