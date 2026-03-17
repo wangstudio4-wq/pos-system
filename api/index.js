@@ -13,7 +13,7 @@ const shiftRoutes = require('../routes/shifts');
 const setupRoutes = require('../routes/setup');
 const dashboardRoutes = require('../routes/dashboard');
 const productRoutes = require('../routes/products');
-const priceTierRoutes = require('../routes/price-tiers');
+// price-tiers: moved to modules/vip-pricing
 const discountRoutes = require('../routes/discounts');
 const debtRoutes = require('../routes/debts');
 const settingsRoutes = require('../routes/settings');
@@ -29,7 +29,9 @@ const customerRoutes = require('../routes/customers');
 const utilityRoutes = require('../routes/utilities');
 const moduleRoutes = require('../routes/modules');
 
+const path = require('path');
 const hooks = require('../core/hooks');
+const BackendModuleLoader = require('../core/module-loader');
 
 const app = express();
 app.set('hooks', hooks);  // Available via req.app.get('hooks') in routes
@@ -107,7 +109,7 @@ app.use('/api/shifts', shiftRoutes);
 app.use('/api', setupRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/products', productRoutes);
-app.use('/api', priceTierRoutes);       // mixed prefixes: /api/products/:id/price-tiers + /api/price-tiers
+// price-tiers: moved to modules/vip-pricing (dynamically loaded)
 app.use('/api', discountRoutes);         // /api/product-discounts
 app.use('/api', debtRoutes);             // /api/debts + /api/kasbon-customers
 app.use('/api/settings', settingsRoutes);
@@ -119,12 +121,19 @@ app.use('/api/stock-opname', stockOpnameRoutes);
 app.use('/api/stock-movements', stockMovementRoutes);
 app.use('/api/products', importProductRoutes);  // /api/products/import
 app.use('/api/customers', customerRoutes);
-app.use('/api', memberRoutes);           // /api/members + /api/member-levels + /api/rewards + /api/special-prices
+app.use('/api', memberRoutes);           // /api/members + /api/member-levels + /api/rewards (special-prices moved to module)
 app.use('/api', utilityRoutes);          // /api/sync + /api/auto-migrate + /sw.js
 app.use('/api/modules', moduleRoutes);   // /api/modules + /api/modules/enabled
 
+// ============ LOAD DYNAMIC MODULES ============
+const moduleLoader = new BackendModuleLoader(app, pool, authenticateToken, authorizeRole, hooks);
+const modulesReady = moduleLoader.init();
+app.set('moduleLoader', moduleLoader);
+
+// Serve module frontend files
+app.use('/modules', express.static(path.join(__dirname, '..', 'public', 'modules')));
+
 // Serve frontend
-const path = require('path');
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));

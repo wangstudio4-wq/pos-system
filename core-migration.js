@@ -250,7 +250,8 @@ async function runAutoMigrate() {
     ('core-pos', 'Point of Sale', 'Kasir & transaksi penjualan', 'core', 1, 1, 1),
     ('core-products', 'Produk & Kategori', 'Manajemen produk dan kategori', 'core', 1, 1, 2),
     ('core-reports', 'Laporan Dasar', 'Laporan penjualan harian', 'core', 1, 1, 3),
-    ('core-users', 'User & Shift', 'Manajemen user, shift, dan kasir', 'core', 1, 1, 4)`);
+    ('core-users', 'User & Shift', 'Manajemen user, shift, dan kasir', 'core', 1, 1, 4),
+    ('vip-pricing', 'Harga VIP', 'Harga khusus per level member atau per pelanggan', 'pricing', 1, 0, 10)`);
 
   console.log('✅ Auto-migrate completed');
 }
